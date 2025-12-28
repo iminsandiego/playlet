@@ -7,9 +7,11 @@ import "pkg:/source/utils/UrlUtils.bs"
 class DashManifest
 
     public invidiousInstance as dynamic
+    public allowAv1 as boolean
 
     function new(invidiousInstance as string)
         m.invidiousInstance = invidiousInstance
+        m.allowAv1 = true
 
         m.utils = new Http.Utils()
 
@@ -158,7 +160,12 @@ class DashManifest
                 end if
             end if
 
-            justCodec = codecs.split(".")[0]
+            justCodec = LCase(codecs.split(".")[0].Trim())
+
+            if format.type.StartsWith("video") and not m.allowAv1 and m.IsAv1Codec(justCodec)
+                LogDebug("Skipping AV1 stream because device does not report AV1 support:", format.qualityLabel, format.itag)
+                continue for
+            end if
 
             colorInfo = ""
             if IsAssociativeArray(format.colorInfo)
@@ -207,6 +214,10 @@ class DashManifest
         end for
 
         return { audio: audioGroups, video: videoGroups }
+    end function
+
+    function IsAv1Codec(codec as string) as boolean
+        return codec = "av01" or codec = "av1"
     end function
 
     function FilterVideoGroups(videoGroups as object, qualityFilter as object) as object
