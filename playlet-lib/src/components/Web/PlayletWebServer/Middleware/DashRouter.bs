@@ -51,6 +51,7 @@ namespace Http
             end if
 
             m.dashManifest.invidiousInstance = m.invidiousService.GetInstance()
+            m.dashManifest.allowAv1 = m.SupportsAv1()
 
             qualityFilter = m.CreateQualityFilter(quality)
             xmlContent = m.dashManifest.FromVideoMetadata(metadata, qualityFilter, ValidString(local) = "true")
@@ -101,6 +102,24 @@ namespace Http
             end for
 
             return qualityFilter
+        end function
+
+        function SupportsAv1() as boolean
+            deviceInfo = CreateObject("roDeviceInfo")
+            if deviceInfo = invalid
+                return false
+            end if
+
+            decodeInfo = deviceInfo.CanDecodeVideo({ "codec": "av1", "container": "dash" })
+            if IsBool(decodeInfo)
+                return decodeInfo
+            end if
+
+            if IsAssociativeArray(decodeInfo)
+                return ValidBool(decodeInfo.result)
+            end if
+
+            return false
         end function
 
         function GenerateDashManifestAppendStoryboards(context as object) as boolean
