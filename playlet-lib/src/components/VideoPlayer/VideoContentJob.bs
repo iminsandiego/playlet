@@ -159,19 +159,34 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     instance = service.GetInstance()
     proxyVideos = preferences["invidious.proxy_videos"]
     preferredQuality = preferences["playback.preferred_quality"]
+    dashPreferredQuality = preferredQuality
+
+    if Prefers4kQuality(preferredQuality) and not DeviceSupportsAv1Dash()
+        dashPreferredQuality = BuildNon4kQuality(preferredQuality)
+        LogWarnNoTelemetry("4K preferred but device does not support AV1; falling back to non-4K DASH qualities:", dashPreferredQuality)
+    end if
+
+    LogAvailableVideoSources(metadata)
+    LogDeviceVideoCapabilities(metadata)
 
     streamUrls = []
 
-    if SupportsDrmDashManifestUrl(metadata)
+    hasDrmDash = SupportsDrmDashManifestUrl(metadata)
+    muxerUrl = BuildMuxerUrl(preferences, metadata, preferredQuality)
+    if muxerUrl <> invalid and not hasDrmDash
+        streamUrls.push(muxerUrl)
+    end if
+
+    if hasDrmDash
         dashUrl = UrlUtils.AppendQueryParams(`http://127.0.0.1:${playletServerPort}/api/dash`, {
             url: metadata.dashUrl
         })
         streamUrls.push(dashUrl)
     else if SupportsHls(metadata)
         metadata.hlsUrl = AddInstanceToUrlIfNeeded(metadata.hlsUrl, instance)
-        AddHlsUrls(streamUrls, metadata, preferredQuality, backend, proxyVideos, playletServerPort)
+        AddHlsUrls(streamUrls, metadata, dashPreferredQuality, backend, proxyVideos, playletServerPort)
     else if SupportsDash(metadata)
-        AddDashUrls(streamUrls, metadata, preferredQuality, backend, proxyVideos, playletServerPort)
+        AddDashUrls(streamUrls, metadata, dashPreferredQuality, backend, proxyVideos, playletServerPort)
     else if SupportsMuxedFormats(metadata)
         for each stream in metadata.formatStreams
             if StringUtils.IsNullOrEmpty(stream.url)
@@ -183,6 +198,324 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     end if
 
     return streamUrls
+end function
+
+function BuildNon4kQuality(preferredQuality as dynamic) as string
+    if not IsString(preferredQuality)
+        return "1080p,720p,480p,360p,240p,144p"
+    end if
+
+    values = preferredQuality.split(",")
+    filtered = []
+    for each value in values
+        trimmed = value.Trim()
+        if StringUtils.IsNullOrEmpty(trimmed)
+            continue for
+        end if
+        normalized = LCase(trimmed)
+        if normalized = "2160p" or normalized = "2160" or normalized = "4k"
+            continue for
+        end if
+        filtered.push(trimmed)
+    end for
+
+    if filtered.Count() = 0
+        return "1080p,720p,480p,360p,240p,144p"
+    end if
+
+    return filtered.Join(",")
+end function
+
+function LogAvailableVideoSources(metadata as object) as void
+    adaptiveFormats = ValidArray(metadata.adaptiveFormats)
+    formatStreams = ValidArray(metadata.formatStreams)
+
+    lines = []
+    AddVideoSourceLines(lines, adaptiveFormats, "adaptive")
+    AddVideoSourceLines(lines, formatStreams, "muxed")
+
+    if lines.Count() = 0
+        LogDebug("Available video sources: none")
+        return
+    end if
+
+    LogDebug("Available video sources:\n" + lines.Join(`\n`))
+end function
+
+function AddVideoSourceLines(lines as object, formats as object, sourceLabel as string) as void
+    for each fmt in formats
+        mimeType = ValidString(fmt["type"])
+        if StringUtils.IsNullOrEmpty(mimeType) or not mimeType.StartsWith("video/")
+            continue for
+        end if
+
+        lines.Push(FormatVideoSourceLine(fmt, sourceLabel))
+    end for
+end function
+
+function FormatVideoSourceLine(fmt as object, sourceLabel as string) as string
+    itag = ValidString(fmt["itag"])
+    mimeType = ValidString(fmt["type"])
+    parsed = ParseMimeType(mimeType)
+    container = parsed.container
+    codec = parsed.codec
+
+    resolution = ValidString(fmt["resolution"])
+    if StringUtils.IsNullOrEmpty(resolution)
+        resolution = ValidString(fmt["qualityLabel"])
+    end if
+    if StringUtils.IsNullOrEmpty(resolution)
+        resolution = ValidString(fmt["size"])
+    end if
+
+    fps = ValidString(fmt["fps"])
+    bitrate = FormatBitrate(fmt["bitrate"])
+
+    parts = [sourceLabel]
+    if not StringUtils.IsNullOrEmpty(itag)
+        parts.Push(`itag=${itag}`)
+    end if
+    if not StringUtils.IsNullOrEmpty(container)
+        parts.Push(`container=${container}`)
+    end if
+    if not StringUtils.IsNullOrEmpty(codec)
+        parts.Push(`codec=${codec}`)
+    end if
+    if not StringUtils.IsNullOrEmpty(resolution)
+        parts.Push(`res=${resolution}`)
+    end if
+    if not StringUtils.IsNullOrEmpty(fps)
+        parts.Push(`fps=${fps}`)
+    end if
+    if not StringUtils.IsNullOrEmpty(bitrate)
+        parts.Push(`bitrate=${bitrate}`)
+    end if
+    if fmt["drmFamilies"] <> invalid
+        parts.Push(`drm=${ToString(fmt["drmFamilies"])}`)
+    end if
+
+    return parts.Join(" ")
+end function
+
+function LogDeviceVideoCapabilities(metadata as object) as void
+    deviceInfo = CreateObject("roDeviceInfo")
+    if deviceInfo = invalid
+        LogDebug("Device video decode capabilities: roDeviceInfo unavailable")
+        return
+    end if
+
+    combos = {}
+    AppendVideoDecodeCombos(combos, ValidArray(metadata.adaptiveFormats), "dash")
+    AppendVideoDecodeCombos(combos, ValidArray(metadata.formatStreams), "")
+
+    if combos.Count() = 0
+        LogDebug("Device video decode capabilities: no codecs to check")
+        return
+    end if
+
+    lines = []
+    for each key in combos
+        combo = combos[key]
+        result = deviceInfo.CanDecodeVideo({ codec: combo.codec, container: combo.container })
+        lines.Push(`${combo.container}/${combo.codec}=${FormatDecodeInfo(result)}`)
+    end for
+
+    LogDebug("Device video decode capabilities:\n" + lines.Join(`\n`))
+end function
+
+function AppendVideoDecodeCombos(combos as object, formats as object, containerOverride as string) as void
+    for each fmt in formats
+        mimeType = ValidString(fmt["type"])
+        if StringUtils.IsNullOrEmpty(mimeType) or not mimeType.StartsWith("video/")
+            continue for
+        end if
+
+        parsed = ParseMimeType(mimeType)
+        codec = NormalizeVideoCodec(parsed.codec)
+        if StringUtils.IsNullOrEmpty(codec)
+            continue for
+        end if
+
+        container = containerOverride
+        if StringUtils.IsNullOrEmpty(container)
+            container = parsed.container
+        end if
+        if StringUtils.IsNullOrEmpty(container)
+            continue for
+        end if
+
+        key = `${container}|${codec}`
+        if not combos.DoesExist(key)
+            combos[key] = { container: container, codec: codec }
+        end if
+    end for
+end function
+
+function ParseMimeType(mimeType as string) as object
+    result = { container: "", codec: "" }
+    if StringUtils.IsNullOrEmpty(mimeType)
+        return result
+    end if
+
+    parts = mimeType.Split(";")
+    typePart = parts[0].Trim()
+    slashIndex = typePart.InStr("/")
+    if slashIndex <> -1
+        result.container = typePart.Mid(slashIndex + 1)
+    end if
+
+    for each part in parts
+        trimmed = part.Trim()
+        if trimmed.StartsWith("codecs=")
+            codecList = trimmed.Mid(7)
+            codecList = codecList.Replace(chr(34), "")
+            codecList = codecList.Replace("'", "")
+            result.codec = codecList
+            exit for
+        end if
+    end for
+
+    return result
+end function
+
+function NormalizeVideoCodec(codecList as string) as string
+    if StringUtils.IsNullOrEmpty(codecList)
+        return ""
+    end if
+
+    codec = codecList.Split(",")[0].Trim()
+    lower = LCase(codec)
+    if lower.StartsWith("av01")
+        return "av1"
+    else if lower.StartsWith("avc1") or lower.StartsWith("avc3")
+        return "h264"
+    else if lower.StartsWith("hev1") or lower.StartsWith("hvc1")
+        return "h265"
+    else if lower.StartsWith("vp9")
+        return "vp9"
+    else if lower.StartsWith("vp8")
+        return "vp8"
+    end if
+
+    return ""
+end function
+
+function FormatBitrate(value as dynamic) as string
+    bitrate = ValidInt(value)
+    if bitrate <= 0
+        return ""
+    end if
+    kbps = bitrate \ 1000
+    if kbps <= 0
+        return `${bitrate} bps`
+    end if
+    return `${kbps} kbps`
+end function
+
+function FormatDecodeInfo(value as dynamic) as string
+    if IsBool(value)
+        return value.ToStr()
+    end if
+    if IsAssociativeArray(value) and value.DoesExist("result")
+        return ToString(value["result"])
+    end if
+    return ToString(value)
+end function
+
+function BuildMuxerUrl(preferences as object, metadata as object, preferredQuality as dynamic) as dynamic
+    muxerBaseUrl = ValidString(preferences["playback.muxer_base_url"])
+    muxerBaseUrl = muxerBaseUrl.Trim()
+    if StringUtils.IsNullOrEmpty(muxerBaseUrl)
+        return invalid
+    end if
+
+    if not Prefers4kQuality(preferredQuality)
+        return invalid
+    end if
+
+    muxerBaseUrl = NormalizeMuxerBaseUrl(muxerBaseUrl)
+    if StringUtils.IsNullOrEmpty(muxerBaseUrl)
+        return invalid
+    end if
+
+    if muxerBaseUrl.Len() >= 5 and muxerBaseUrl.Right(5) = "/dash"
+        muxerUrl = muxerBaseUrl
+    else if muxerBaseUrl.Len() >= 4 and muxerBaseUrl.Right(4) = "/mux"
+        muxerUrl = muxerBaseUrl
+    else
+        muxerUrl = StringUtils.PathJoin(muxerBaseUrl, "mux")
+    end if
+
+    videoId = metadata.videoId
+    if StringUtils.IsNullOrEmpty(videoId)
+        return invalid
+    end if
+
+    return UrlUtils.AppendQueryParams(muxerUrl, {
+        v: videoId
+        quality: "2160p"
+        container: "webm"
+    })
+end function
+
+function NormalizeMuxerBaseUrl(url as string) as string
+    normalized = url.Trim()
+    if StringUtils.IsNullOrEmpty(normalized)
+        return ""
+    end if
+
+    lower = LCase(normalized)
+    if lower.StartsWith("http//")
+        normalized = "http://" + normalized.Mid(6)
+        lower = LCase(normalized)
+    else if lower.StartsWith("https//")
+        normalized = "https://" + normalized.Mid(7)
+        lower = LCase(normalized)
+    end if
+
+    if not lower.StartsWith("http://") and not lower.StartsWith("https://")
+        normalized = "http://" + normalized
+    end if
+
+    if normalized.EndsWith("/")
+        normalized = normalized.Left(normalized.Len() - 1)
+    end if
+
+    return normalized
+end function
+
+function Prefers4kQuality(preferredQuality as dynamic) as boolean
+    if not IsString(preferredQuality)
+        return false
+    end if
+
+    values = preferredQuality.split(",")
+    for each value in values
+        candidate = LCase(value.Trim())
+        if candidate = "2160p" or candidate = "2160" or candidate = "4k"
+            return true
+        end if
+    end for
+
+    return false
+end function
+
+function DeviceSupportsAv1Dash() as boolean
+    deviceInfo = CreateObject("roDeviceInfo")
+    if deviceInfo = invalid
+        return false
+    end if
+
+    decodeInfo = deviceInfo.CanDecodeVideo({ "codec": "av1", "container": "dash" })
+    if IsBool(decodeInfo)
+        return decodeInfo
+    end if
+
+    if IsAssociativeArray(decodeInfo)
+        return ValidBool(decodeInfo.result)
+    end if
+
+    return false
 end function
 
 function SupportsHls(metadata as object) as boolean

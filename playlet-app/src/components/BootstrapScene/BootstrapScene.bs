@@ -4,6 +4,8 @@ import "pkg:/source/Logger.bs"
 import "pkg:/source/Manifest.bs"
 import "pkg:/source/Registry.bs"
 
+const LINK_LOCAL_TIMEOUT_MS = 3000
+
 function Init() as void
     m.scene = m.top.getScene()
     m.top.backgroundColor = "#242424FF"
@@ -19,6 +21,8 @@ function Init() as void
 
     m.playletLibUrls = GetPlayletLibUrls()
     m.playletLibUrlIndex = 0
+    m.loadTimeoutTimer = invalid
+    m.loadTimeoutUrl = invalid
 
     LoadPlayletLib()
 end function
@@ -62,6 +66,8 @@ function LoadPlayletLib() as void
 end function
 
 function OnLoadStatusChanged() as void
+    CancelLoadTimeout()
+
     libUrl = m.playletLibUrls[m.playletLibUrlIndex]
     if m.lib.loadStatus = "ready"
         RemoveComponentLibrary()
@@ -86,6 +92,7 @@ function RemoveComponentLibrary() as void
         return
     end if
 
+    CancelLoadTimeout()
     m.lib.unobserveField("loadStatus")
     m.scene.removeChild(m.lib)
     m.lib = invalid
@@ -101,6 +108,64 @@ function LoadComponentLibrary(uri as string)
 
     Logger.Log(`Loading Playlet lib from ${uri}`)
     m.lib.uri = uri
+    StartLoadTimeout(uri)
+end function
+
+function StartLoadTimeout(uri as string) as void
+    if not IsLinkLocalUrl(uri)
+        return
+    end if
+
+    if m.loadTimeoutTimer = invalid
+        m.loadTimeoutTimer = CreateObject("roSGNode", "Timer")
+        m.loadTimeoutTimer.repeat = false
+        ' bs:disable-next-line NO_OBSERVE_STRING_CALLBACK
+        m.loadTimeoutTimer.observeField("fire", "OnLoadTimeout")
+    end if
+
+    m.loadTimeoutUrl = uri
+    m.loadTimeoutTimer.duration = LINK_LOCAL_TIMEOUT_MS / 1000.0
+    m.loadTimeoutTimer.control = "stop"
+    m.loadTimeoutTimer.control = "start"
+end function
+
+function CancelLoadTimeout() as void
+    if m.loadTimeoutTimer <> invalid
+        m.loadTimeoutTimer.control = "stop"
+    end if
+    m.loadTimeoutUrl = invalid
+end function
+
+function OnLoadTimeout() as void
+    if m.lib = invalid
+        return
+    end if
+    if m.loadTimeoutUrl = invalid
+        return
+    end if
+    if m.lib.loadStatus = "ready" or m.lib.loadStatus = "failed"
+        return
+    end if
+
+    Logger.Log(`Playlet lib load timed out after ${LINK_LOCAL_TIMEOUT_MS} ms for ${m.loadTimeoutUrl}`)
+    RemoveComponentLibrary()
+    m.playletLibUrlIndex += 1
+    LoadPlayletLib()
+end function
+
+function IsLinkLocalUrl(url as string) as boolean
+    if url = invalid
+        return false
+    end if
+
+    lower = LCase(url)
+    if lower.StartsWith("http://")
+        lower = lower.Mid(7)
+    else if lower.StartsWith("https://")
+        lower = lower.Mid(8)
+    end if
+
+    return lower.StartsWith("169.254.")
 end function
 
 function ShowPlayletLibLoadErrorDialog()
