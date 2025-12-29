@@ -24,6 +24,8 @@
                 <ContentNode role="content">
                     <ContentNode id="auto" title="Auto" />
                     <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="2160p" title="2160p" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
                     <ContentNode id="1080p" title="1080p" />
                     <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
                     <ContentNode id="720p" title="720p" />

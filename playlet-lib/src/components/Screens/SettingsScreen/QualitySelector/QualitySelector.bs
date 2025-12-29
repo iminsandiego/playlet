@@ -19,7 +19,7 @@ function Init()
     m.saveButton.observeField("buttonSelected", FuncName(OnSaveButtonSelected))
     m.closeButton.observeField("buttonSelected", FuncName(Close))
 
-    m.lastCheckedState = [false, false, false, false, false, false, false]
+    m.lastCheckedState = [false, false, false, false, false, false, false, false]
     m.checkList.observeField("checkedState", FuncName(OnCheckedStateChange))
 
     SetButtonPositions()
@@ -99,16 +99,16 @@ function OnCheckedStateChange() as void
 
     if autoChanged
         if hasAuto
-            checkedState = [true, false, false, false, false, false, false]
+            checkedState = [true, false, false, false, false, false, false, false]
             m.lastCheckedState = checkedState
             m.checkList.checkedState = checkedState
             m.top.value = "auto"
             return
         else
-            checkedState = [false, true, true, true, true, true, true]
+            checkedState = [false, true, true, true, true, true, true, true]
             m.lastCheckedState = checkedState
             m.checkList.checkedState = checkedState
-            m.top.value = "1080p,720p,480p,360p,240p,144p"
+            m.top.value = "2160p,1080p,720p,480p,360p,240p,144p"
             return
         end if
     end if
@@ -128,7 +128,7 @@ function OnCheckedStateChange() as void
     end for
 
     if values.Count() = 0
-        checkedState = [true, false, false, false, false, false, false]
+        checkedState = [true, false, false, false, false, false, false, false]
         m.lastCheckedState = checkedState
         m.checkList.checkedState = checkedState
         m.top.value = "auto"

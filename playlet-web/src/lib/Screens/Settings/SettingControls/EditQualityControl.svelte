@@ -5,6 +5,7 @@
   const textSizes = ["text-2xl", "text-lg", "text-base", "text-sm", "text-xs"];
   const qualityLabels = {
     auto: "Auto",
+    "2160p": "2160p",
     "1080p": "1080p",
     "720p": "720p",
     "480p": "480p",

@@ -27,6 +27,20 @@
         visibility: "web",
         svelteComponent: "EditQualityControl",
       },
+      {
+        displayText: "4K Muxer base URL",
+        key: "playback.muxer_base_url",
+        description: "Example: http://192.168.1.132:8787",
+        type: "string",
+        defaultValue: "http://192.168.1.32:8787",
+      },
+      {
+        displayText: "Stats for Nerds",
+        key: "playback.stats_for_nerds",
+        description: "Show playback stats overlay",
+        type: "boolean",
+        defaultValue: false,
+      },
     ],
   },
   {
