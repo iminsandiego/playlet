@@ -902,13 +902,15 @@ function UpdateStatsOverlay() as void
         lines.Push(`Container: ${container}`)
     end if
 
-    ' Use quality from URL to set default resolution if not already set
     quality = ExtractQueryValue(query, "quality")
-    if not StringUtils.IsNullOrEmpty(quality) and StringUtils.IsNullOrEmpty(m.statsResolution)
+    if not StringUtils.IsNullOrEmpty(quality)
         if quality.InStr(",") <> -1
             quality = quality.Split(",")[0].Trim()
         end if
-        m.statsResolution = quality
+        lines.Push(`Quality: ${quality}`)
+        if StringUtils.IsNullOrEmpty(m.statsResolution)
+            m.statsResolution = quality
+        end if
     end if
 
     videoFormat = ValidString(m.top.videoFormat)
