@@ -902,15 +902,13 @@ function UpdateStatsOverlay() as void
         lines.Push(`Container: ${container}`)
     end if
 
+    ' Use quality from URL to set default resolution if not already set
     quality = ExtractQueryValue(query, "quality")
-    if not StringUtils.IsNullOrEmpty(quality)
+    if not StringUtils.IsNullOrEmpty(quality) and StringUtils.IsNullOrEmpty(m.statsResolution)
         if quality.InStr(",") <> -1
             quality = quality.Split(",")[0].Trim()
         end if
-        lines.Push(`Quality: ${quality}`)
-        if StringUtils.IsNullOrEmpty(m.statsResolution)
-            m.statsResolution = quality
-        end if
+        m.statsResolution = quality
     end if
 
     videoFormat = ValidString(m.top.videoFormat)
@@ -1133,7 +1131,8 @@ function ExtractSegmentBitrate(segment as object) as dynamic
         return invalid
     end if
 
-    keys = ["bitrate", "bandwidth", "bitsPerSecond", "bps"]
+    ' Prefer segBps (actual measured bits per second) over bandwidth/bitrate (advertised max bitrate)
+    keys = ["segBps", "bitrate", "bandwidth", "bitsPerSecond", "bps"]
     for each key in keys
         if segment.DoesExist(key)
             value = ParseNumeric(segment[key])

@@ -8,10 +8,14 @@ class DashManifest
 
     public invidiousInstance as dynamic
     public allowAv1 as boolean
+    public allowVp9 as boolean
+    public allowHevc as boolean
 
     function new(invidiousInstance as string)
         m.invidiousInstance = invidiousInstance
         m.allowAv1 = true
+        m.allowVp9 = true
+        m.allowHevc = true
 
         m.utils = new Http.Utils()
 
@@ -162,9 +166,19 @@ class DashManifest
 
             justCodec = LCase(codecs.split(".")[0].Trim())
 
-            if format.type.StartsWith("video") and not m.allowAv1 and m.IsAv1Codec(justCodec)
-                LogDebug("Skipping AV1 stream because device does not report AV1 support:", format.qualityLabel, format.itag)
-                continue for
+            if format.type.StartsWith("video")
+                if not m.allowAv1 and m.IsAv1Codec(justCodec)
+                    LogDebug("Skipping AV1 stream because device does not report AV1 support:", format.qualityLabel, format.itag)
+                    continue for
+                end if
+                if not m.allowVp9 and m.IsVp9Codec(justCodec)
+                    LogDebug("Skipping VP9 stream because device does not report VP9 support:", format.qualityLabel, format.itag)
+                    continue for
+                end if
+                if not m.allowHevc and m.IsHevcCodec(justCodec)
+                    LogDebug("Skipping HEVC stream because device does not report HEVC support:", format.qualityLabel, format.itag)
+                    continue for
+                end if
             end if
 
             colorInfo = ""
@@ -218,6 +232,14 @@ class DashManifest
 
     function IsAv1Codec(codec as string) as boolean
         return codec = "av01" or codec = "av1"
+    end function
+
+    function IsVp9Codec(codec as string) as boolean
+        return codec = "vp9" or codec = "vp09"
+    end function
+
+    function IsHevcCodec(codec as string) as boolean
+        return codec = "hevc" or codec = "hvc1" or codec = "hev1" or codec = "h265"
     end function
 
     function FilterVideoGroups(videoGroups as object, qualityFilter as object) as object

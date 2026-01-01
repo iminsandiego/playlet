@@ -24,42 +24,68 @@ import (
 )
 
 type Config struct {
-    ListenAddr       string
-    SourceBase       string
-    CacheDir         string
-    CacheTTL         time.Duration
-    YtDlpPath        string
-    FfmpegPath       string
-    YtDlpJsRuntime   string
-    DefaultContainer string
-    DashSegmentDur   time.Duration
-    DashReadyTimeout time.Duration
-    DashTranscode    bool
-    MaxVideoTbrKbps  int
-    MaxVideoFps      int
+	ListenAddr       string
+	SourceBase       string
+	CacheDir         string
+	CacheTTL         time.Duration
+	YtDlpPath        string
+	FfmpegPath       string
+	YtDlpJsRuntime   string
+	DefaultContainer string
+	DashSegmentDur   time.Duration
+	DashReadyTimeout time.Duration
+	DashTranscode    bool
+	MaxVideoTbrKbps  int
+	MaxVideoFps      int
+	HlsSegmentDur    time.Duration
 }
 
 type muxer struct {
-    cfg         Config
-    mu          sync.Mutex
-    active      map[string]*dashJob
-    lastCleanup time.Time
-    reqCounter  uint64
+	cfg         Config
+	mu          sync.Mutex
+	active      map[string]*dashJob
+	hlsActive   map[string]*hlsJob
+	lastCleanup time.Time
+	reqCounter  uint64
 }
 
 type dashJob struct {
-    key          string
-    dir          string
-    manifestPath string
-    completePath string
-    started      time.Time
-    done         chan struct{}
-    err          error
-    ctx          context.Context
-    cancel       context.CancelFunc
-    waiters      int32
-    cancelOnce   sync.Once
-    served       uint32
+	key          string
+	dir          string
+	manifestPath string
+	completePath string
+	started      time.Time
+	done         chan struct{}
+	err          error
+	ctx          context.Context
+	cancel       context.CancelFunc
+	waiters      int32
+	cancelOnce   sync.Once
+	served       uint32
+}
+
+type hlsJob struct {
+	key          string
+	dir          string
+	manifestPath string
+	videoCodec   string
+	started      time.Time
+	done         chan struct{}
+	err          error
+	ctx          context.Context
+	cancel       context.CancelFunc
+	waiters      int32
+	cancelOnce   sync.Once
+}
+
+type streamSelection struct {
+	formatID string
+	width    int
+	height   int
+	fps      string
+	tbrKbps  string
+	vcodec   string
+	acodec   string
 }
 
 func main() {
@@ -83,11 +109,15 @@ func main() {
 
     m := newMuxer(cfg)
 
-    mux := http.NewServeMux()
-    mux.HandleFunc("/health", handleHealth)
-    mux.HandleFunc("/mux", m.handleMux)
-    mux.HandleFunc("/dash", m.handleMux)
-    mux.Handle("/dash/", http.StripPrefix("/dash/", http.FileServer(http.Dir(cfg.CacheDir))))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/mux", m.handleMux)
+	mux.HandleFunc("/mux.m3u8", m.handleHls)
+	mux.HandleFunc("/dash", m.handleMux)
+	mux.Handle("/dash/", http.StripPrefix("/dash/", http.FileServer(http.Dir(cfg.CacheDir))))
+	mux.HandleFunc("/hls", m.handleHls)
+	mux.HandleFunc("/hls.m3u8", m.handleHls)
+	mux.Handle("/hls/", m.handleHlsFiles())
 
     server := &http.Server{
         Addr:              cfg.ListenAddr,
@@ -124,14 +154,15 @@ func loadConfig() Config {
         DefaultContainer: strings.ToLower(getEnv("MUXER_CONTAINER", "webm")),
         DashSegmentDur:   time.Duration(getEnvInt("MUXER_DASH_SEGMENT_SECONDS", 4)) * time.Second,
         DashReadyTimeout: time.Duration(dashReadyTimeoutSeconds) * time.Second,
-        DashTranscode:    getEnvBool("MUXER_DASH_TRANSCODE", true),
-        MaxVideoTbrKbps:  getEnvInt("MUXER_MAX_VIDEO_TBR_KBPS", 40000),
-        MaxVideoFps:      getEnvInt("MUXER_MAX_VIDEO_FPS", 30),
-    }
+		DashTranscode:    getEnvBool("MUXER_DASH_TRANSCODE", true),
+		MaxVideoTbrKbps:  getEnvInt("MUXER_MAX_VIDEO_TBR_KBPS", 40000),
+		MaxVideoFps:      getEnvInt("MUXER_MAX_VIDEO_FPS", 60),
+		HlsSegmentDur:    time.Duration(getEnvInt("MUXER_HLS_SEGMENT_SECONDS", 6)) * time.Second,
+	}
 
-    if cfg.DefaultContainer != "webm" && cfg.DefaultContainer != "mkv" {
-        cfg.DefaultContainer = "webm"
-    }
+	if cfg.DefaultContainer != "webm" && cfg.DefaultContainer != "mkv" && cfg.DefaultContainer != "hls" {
+		cfg.DefaultContainer = "webm"
+	}
 
     return cfg
 }
@@ -151,10 +182,11 @@ func loadDotEnv() {
 }
 
 func newMuxer(cfg Config) *muxer {
-    return &muxer{
-        cfg:    cfg,
-        active: make(map[string]*dashJob),
-    }
+	return &muxer{
+		cfg:       cfg,
+		active:    make(map[string]*dashJob),
+		hlsActive: make(map[string]*hlsJob),
+	}
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -183,10 +215,16 @@ func (m *muxer) handleMux(w http.ResponseWriter, r *http.Request) {
     if container == "" {
         container = m.cfg.DefaultContainer
     }
-    if container != "webm" && container != "mkv" {
-        http.Error(w, "container must be webm or mkv", http.StatusBadRequest)
-        return
-    }
+	if container != "webm" && container != "mkv" && container != "hls" {
+		http.Error(w, "container must be webm, mkv, or hls", http.StatusBadRequest)
+		return
+	}
+
+	// For HLS, redirect to the HLS endpoint
+	if container == "hls" {
+		m.handleHls(w, r)
+		return
+	}
 
     sourceURL, err := m.buildSourceURL(urlParam, v)
     if err != nil {
@@ -269,6 +307,9 @@ func (m *muxer) cleanupCache() {
     for key := range m.active {
         activeKeys[key] = struct{}{}
     }
+	for key := range m.hlsActive {
+		activeKeys["hls-"+key] = struct{}{}
+	}
     m.mu.Unlock()
 
     cutoff := time.Now().Add(-m.cfg.CacheTTL)
@@ -286,6 +327,13 @@ func (m *muxer) cleanupCache() {
                 }
                 continue
             }
+			accessPath := filepath.Join(fullPath, ".access")
+			if info, err := os.Stat(accessPath); err == nil {
+				if info.ModTime().Before(cutoff) {
+					_ = os.RemoveAll(fullPath)
+				}
+				continue
+			}
             if info, err := entry.Info(); err == nil {
                 if info.ModTime().Before(cutoff) {
                     _ = os.RemoveAll(fullPath)
@@ -366,7 +414,7 @@ func (m *muxer) runDashJob(job *dashJob, sourceURL string, height int) {
     if ctx == nil {
         ctx = context.Background()
     }
-    videoURL, audioURL, err := m.resolveStreams(ctx, sourceURL, height, logPrefix)
+    videoURL, audioURL, _, err := m.resolveStreams(ctx, sourceURL, height, logPrefix)
     if err != nil {
         job.err = err
         if errors.Is(err, context.Canceled) || ctx.Err() != nil {
@@ -399,12 +447,14 @@ func (m *muxer) runDashJob(job *dashJob, sourceURL string, height int) {
     log.Printf("%s complete duration=%s dir=%s", logPrefix, time.Since(start), job.dir)
 }
 
-func (m *muxer) resolveStreams(ctx context.Context, sourceURL string, height int, logPrefix string) (string, string, error) {
+func (m *muxer) resolveStreams(ctx context.Context, sourceURL string, height int, logPrefix string) (string, string, *streamSelection, error) {
     format := buildFormat(height, m.cfg.MaxVideoTbrKbps, m.cfg.MaxVideoFps)
     args := []string{"-f", format, "-g", "--no-playlist", "--remote-components", "ejs:github"}
     if m.cfg.YtDlpJsRuntime != "" {
         args = append(args, "--js-runtimes", m.cfg.YtDlpJsRuntime)
     }
+	// Emit a stable, parseable line with the selected format's key stats.
+	args = append(args, "--print", "META format_id=%(format_id)s width=%(width)s height=%(height)s fps=%(fps)s tbr=%(tbr)s vcodec=%(vcodec)s acodec=%(acodec)s")
     args = append(args, sourceURL)
 
     cmd := exec.CommandContext(ctx, m.cfg.YtDlpPath, args...)
@@ -412,15 +462,15 @@ func (m *muxer) resolveStreams(ctx context.Context, sourceURL string, height int
     start := time.Now()
     stdoutPipe, err := cmd.StdoutPipe()
     if err != nil {
-        return "", "", fmt.Errorf("yt-dlp stdout pipe error: %v", err)
+        return "", "", nil, fmt.Errorf("yt-dlp stdout pipe error: %v", err)
     }
     stderrPipe, err := cmd.StderrPipe()
     if err != nil {
-        return "", "", fmt.Errorf("yt-dlp stderr pipe error: %v", err)
+        return "", "", nil, fmt.Errorf("yt-dlp stderr pipe error: %v", err)
     }
 
     if err := cmd.Start(); err != nil {
-        return "", "", fmt.Errorf("yt-dlp start error: %v", err)
+        return "", "", nil, fmt.Errorf("yt-dlp start error: %v", err)
     }
 
     var stdoutBytes, stderrBytes []byte
@@ -441,10 +491,10 @@ func (m *muxer) resolveStreams(ctx context.Context, sourceURL string, height int
     duration := time.Since(start)
 
     if stdoutErr != nil {
-        return "", "", fmt.Errorf("yt-dlp stdout read error: %v", stdoutErr)
+        return "", "", nil, fmt.Errorf("yt-dlp stdout read error: %v", stdoutErr)
     }
     if stderrErr != nil {
-        return "", "", fmt.Errorf("yt-dlp stderr read error: %v", stderrErr)
+        return "", "", nil, fmt.Errorf("yt-dlp stderr read error: %v", stderrErr)
     }
 
     stdoutText := strings.TrimSpace(string(stdoutBytes))
@@ -463,27 +513,102 @@ func (m *muxer) resolveStreams(ctx context.Context, sourceURL string, height int
         if msg == "" {
             msg = waitErr.Error()
         }
-        return "", "", fmt.Errorf("yt-dlp error: %s", msg)
+        return "", "", nil, fmt.Errorf("yt-dlp error: %s", msg)
     }
 
+	var selection *streamSelection
     urls := make([]string, 0, 2)
     scanner := bufio.NewScanner(bytes.NewReader(stdoutBytes))
     for scanner.Scan() {
         line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "META ") {
+			if parsed := parseStreamSelection(strings.TrimPrefix(line, "META ")); parsed != nil {
+				selection = parsed
+			}
+			continue
+		}
         if strings.HasPrefix(line, "http") {
             urls = append(urls, line)
         }
     }
     if err := scanner.Err(); err != nil {
-        return "", "", fmt.Errorf("yt-dlp output error: %v", err)
+        return "", "", nil, fmt.Errorf("yt-dlp output error: %v", err)
     }
 
     if len(urls) < 2 {
         log.Printf("%s yt-dlp returned %d urls", logPrefix, len(urls))
-        return "", "", fmt.Errorf("yt-dlp returned %d urls, expected video and audio", len(urls))
+        return "", "", selection, fmt.Errorf("yt-dlp returned %d urls, expected video and audio", len(urls))
     }
 
-    return urls[0], urls[1], nil
+	if selection != nil {
+		log.Printf(
+			"%s yt-dlp selection format_id=%s vcodec=%s acodec=%s width=%d height=%d fps=%s tbr_kbps=%s",
+			logPrefix,
+			selection.formatID,
+			selection.vcodec,
+			selection.acodec,
+			selection.width,
+			selection.height,
+			selection.fps,
+			selection.tbrKbps,
+		)
+	}
+
+    return urls[0], urls[1], selection, nil
+}
+
+func parseStreamSelection(meta string) *streamSelection {
+	fields := strings.Fields(meta)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	values := map[string]string{}
+	for _, field := range fields {
+		parts := strings.SplitN(field, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if key == "" {
+			continue
+		}
+		values[key] = val
+	}
+
+	parseInt := func(key string) int {
+		val, ok := values[key]
+		if !ok || val == "" || val == "NA" {
+			return 0
+		}
+		if n, err := strconv.Atoi(val); err == nil {
+			return n
+		}
+		return 0
+	}
+
+	parseTbrKbps := func() string {
+		val, ok := values["tbr"]
+		if !ok || val == "" || val == "NA" {
+			return ""
+		}
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return ""
+		}
+		return strconv.Itoa(int(f + 0.5))
+	}
+
+	return &streamSelection{
+		formatID: values["format_id"],
+		width:    parseInt("width"),
+		height:   parseInt("height"),
+		fps:      values["fps"],
+		tbrKbps:  parseTbrKbps(),
+		vcodec:   values["vcodec"],
+		acodec:   values["acodec"],
+	}
 }
 
 func buildFormat(height int, maxVideoTbrKbps int, maxVideoFps int) string {
@@ -665,7 +790,7 @@ func runFfmpegToDash(ctx context.Context, ffmpegPath, videoURL, audioURL, output
 func (m *muxer) streamLive(w http.ResponseWriter, r *http.Request, sourceURL string, height int, container string, logPrefix string) {
     ctx := r.Context()
     log.Printf("%s live stream start source=%s height=%d container=%s", logPrefix, sourceURL, height, container)
-    videoURL, audioURL, err := m.resolveStreams(ctx, sourceURL, height, logPrefix)
+    videoURL, audioURL, selection, err := m.resolveStreams(ctx, sourceURL, height, logPrefix)
     if err != nil {
         http.Error(w, err.Error(), http.StatusBadRequest)
         return
@@ -698,6 +823,18 @@ func (m *muxer) streamLive(w http.ResponseWriter, r *http.Request, sourceURL str
         return
     }
 
+	if selection != nil {
+		if selection.width > 0 && selection.height > 0 {
+			w.Header().Set("X-Muxer-Video-Resolution", fmt.Sprintf("%dx%d", selection.width, selection.height))
+		}
+		if selection.tbrKbps != "" {
+			w.Header().Set("X-Muxer-Video-Tbr-Kbps", selection.tbrKbps)
+		}
+		if selection.formatID != "" {
+			w.Header().Set("X-Muxer-Format-Id", selection.formatID)
+		}
+	}
+
     w.Header().Set("Content-Type", contentType(container))
     w.WriteHeader(http.StatusOK)
     if flusher, ok := w.(http.Flusher); ok {
@@ -705,8 +842,37 @@ func (m *muxer) streamLive(w http.ResponseWriter, r *http.Request, sourceURL str
     }
 
     start := time.Now()
-    _, copyErr := io.Copy(w, stdout)
+	var bytesOut uint64
+	copyDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		lastBytes := uint64(0)
+		lastTime := time.Now()
+		for {
+			select {
+			case <-copyDone:
+				return
+			case <-ticker.C:
+				now := time.Now()
+				total := atomic.LoadUint64(&bytesOut)
+				deltaBytes := total - lastBytes
+				deltaSeconds := now.Sub(lastTime).Seconds()
+				if deltaSeconds <= 0 {
+					continue
+				}
+				windowKbps := (float64(deltaBytes) * 8.0) / 1000.0 / deltaSeconds
+				avgKbps := (float64(total) * 8.0) / 1000.0 / now.Sub(start).Seconds()
+				log.Printf("%s live stats elapsed=%s out_bytes=%d avg_kbps=%.0f window_kbps=%.0f", logPrefix, now.Sub(start).Truncate(time.Second), total, avgKbps, windowKbps)
+				lastBytes = total
+				lastTime = now
+			}
+		}
+	}()
+
+    _, copyErr := io.Copy(countingWriter{w: w, n: &bytesOut}, stdout)
     waitErr := cmd.Wait()
+	close(copyDone)
     duration := time.Since(start)
 
     if ctx.Err() == nil && copyErr != nil {
@@ -717,7 +883,437 @@ func (m *muxer) streamLive(w http.ResponseWriter, r *http.Request, sourceURL str
     } else if ctx.Err() == nil && stderr.Len() > 0 {
         log.Printf("%s live ffmpeg output: %s", logPrefix, truncateLog(sanitizeLog(stderr.String()), 1200))
     }
-    log.Printf("%s live stream done duration=%s", logPrefix, duration)
+	if duration > 0 {
+		avgKbps := (float64(atomic.LoadUint64(&bytesOut)) * 8.0) / 1000.0 / duration.Seconds()
+		log.Printf("%s live stream done duration=%s out_bytes=%d avg_kbps=%.0f", logPrefix, duration, atomic.LoadUint64(&bytesOut), avgKbps)
+	} else {
+		log.Printf("%s live stream done duration=%s out_bytes=%d", logPrefix, duration, atomic.LoadUint64(&bytesOut))
+	}
+}
+
+type countingWriter struct {
+	w io.Writer
+	n *uint64
+}
+
+func (cw countingWriter) Write(p []byte) (int, error) {
+	written, err := cw.w.Write(p)
+	if written > 0 && cw.n != nil {
+		atomic.AddUint64(cw.n, uint64(written))
+	}
+	return written, err
+}
+
+// handleHls handles HLS stream requests - creates VP9 content in HLS format
+// which is supported for VP9 playback on Roku devices
+func (m *muxer) handleHls(w http.ResponseWriter, r *http.Request) {
+	reqNum := atomic.AddUint64(&m.reqCounter, 1)
+	logPrefix := fmt.Sprintf("[hls-%d]", reqNum)
+	log.Printf("%s %s %s", logPrefix, r.Method, r.URL.String())
+
+	m.maybeCleanup()
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	urlParam := strings.TrimSpace(q.Get("url"))
+	v := strings.TrimSpace(q.Get("v"))
+	quality := strings.TrimSpace(q.Get("quality"))
+	vcodec := strings.ToLower(strings.TrimSpace(q.Get("vcodec")))
+	if vcodec == "" {
+		vcodec = "vp9"
+	}
+	if vcodec != "vp9" && vcodec != "h264" {
+		http.Error(w, "vcodec must be vp9 or h264", http.StatusBadRequest)
+		return
+	}
+
+	sourceURL, err := m.buildSourceURL(urlParam, v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	height := parseQuality(quality)
+	key := hlsCacheKey(sourceURL, height, vcodec)
+	log.Printf("%s source=%s height=%d vcodec=%s key=%s", logPrefix, sourceURL, height, vcodec, key)
+
+	jobDir := filepath.Join(m.cfg.CacheDir, "hls-"+key)
+	manifestPath := filepath.Join(jobDir, "index.m3u8")
+
+	if isPlayableHlsManifest(manifestPath) {
+		m.serveHlsManifest(w, r, key, manifestPath, logPrefix)
+		return
+	}
+
+	// Check if we already have an active HLS job
+	m.mu.Lock()
+	job, exists := m.hlsActive[key]
+	if !exists {
+		ctx, cancel := context.WithCancel(context.Background())
+		job = &hlsJob{
+			key:          key,
+			dir:          jobDir,
+			manifestPath: manifestPath,
+			videoCodec:   vcodec,
+			started:      time.Now(),
+			done:         make(chan struct{}),
+			ctx:          ctx,
+			cancel:       cancel,
+		}
+		m.hlsActive[key] = job
+
+		// Start HLS generation in background
+		go m.generateHls(job, sourceURL, height, logPrefix)
+	}
+	m.mu.Unlock()
+
+	// Wait for manifest to be ready
+	err = m.waitForHlsManifest(job, m.cfg.DashReadyTimeout, logPrefix)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("HLS generation failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	m.serveHlsManifest(w, r, key, manifestPath, logPrefix)
+}
+
+func (m *muxer) generateHls(job *hlsJob, sourceURL string, height int, logPrefix string) {
+	defer func() {
+		m.mu.Lock()
+		delete(m.hlsActive, job.key)
+		m.mu.Unlock()
+		close(job.done)
+	}()
+
+	// Create directory
+	_ = os.RemoveAll(job.dir)
+	if err := os.MkdirAll(job.dir, 0755); err != nil {
+		job.err = fmt.Errorf("failed to create HLS dir: %w", err)
+		log.Printf("%s %v", logPrefix, job.err)
+		return
+	}
+
+	log.Printf("%s resolving streams for HLS", logPrefix)
+	videoURL, audioURL, selection, err := m.resolveStreams(job.ctx, sourceURL, height, logPrefix)
+	if err != nil {
+		job.err = fmt.Errorf("failed to resolve streams: %w", err)
+		log.Printf("%s %v", logPrefix, job.err)
+		return
+	}
+
+	if selection != nil {
+		_ = os.WriteFile(
+			filepath.Join(job.dir, "selection.txt"),
+			[]byte(
+				fmt.Sprintf(
+					"format_id=%s vcodec=%s acodec=%s width=%d height=%d fps=%s tbr=%s\n",
+					selection.formatID,
+					selection.vcodec,
+					selection.acodec,
+					selection.width,
+					selection.height,
+					selection.fps,
+					selection.tbrKbps,
+				),
+			),
+			0644,
+		)
+	}
+
+	segmentDur := int(m.cfg.HlsSegmentDur.Seconds())
+	if segmentDur <= 0 {
+		segmentDur = 6
+	}
+	segmentPattern := "segment_%d.m4s"
+	manifestName := filepath.Base(job.manifestPath)
+
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "error",
+		"-y",
+		"-i", videoURL,
+		"-i", audioURL,
+		"-map", "0:v:0",
+		"-map", "1:a:0",
+	}
+
+	switch job.videoCodec {
+	case "h264":
+		gop := segmentDur * 30
+		if gop <= 0 {
+			gop = 180
+		}
+		forceKey := fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentDur)
+		args = append(args,
+			"-c:v", "libx264",
+			"-preset", "veryfast",
+			"-profile:v", "high",
+			"-level:v", "5.1",
+			"-pix_fmt", "yuv420p",
+			"-g", strconv.Itoa(gop),
+			"-keyint_min", strconv.Itoa(gop),
+			"-sc_threshold", "0",
+			"-force_key_frames", forceKey,
+		)
+	default:
+		args = append(args, "-c:v", "copy")
+	}
+
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-ac", "2",
+		"-f", "hls",
+		"-hls_time", strconv.Itoa(segmentDur),
+		"-hls_list_size", "0",
+		"-hls_playlist_type", "event",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_flags", "independent_segments+temp_file",
+		"-hls_segment_filename", segmentPattern,
+		manifestName,
+	)
+
+	cmd := exec.CommandContext(job.ctx, m.cfg.FfmpegPath, args...)
+	cmd.Dir = job.dir
+	log.Printf("%s ffmpeg cmd=%s", logPrefix, formatCommand(m.cfg.FfmpegPath, args))
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		job.err = fmt.Errorf("failed to start ffmpeg: %w", err)
+		log.Printf("%s %v", logPrefix, job.err)
+		return
+	}
+
+	err = cmd.Wait()
+	if err != nil && job.ctx.Err() == nil {
+		job.err = fmt.Errorf("ffmpeg failed: %w, output: %s", err, truncateLog(sanitizeLog(stderr.String()), 500))
+		log.Printf("%s %v", logPrefix, job.err)
+		return
+	}
+
+	log.Printf("%s HLS generation complete", logPrefix)
+}
+
+func (m *muxer) waitForHlsManifest(job *hlsJob, timeout time.Duration, logPrefix string) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		// Check if manifest (and required init) exists and is usable.
+		if isPlayableHlsManifest(job.manifestPath) {
+			return nil
+		}
+
+		// Check if job failed
+		select {
+		case <-job.done:
+			if job.err != nil {
+				return job.err
+			}
+			// Job done but no manifest - something went wrong
+			if _, err := os.Stat(job.manifestPath); os.IsNotExist(err) {
+				return errors.New("HLS job completed but no manifest generated")
+			}
+			return nil
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			return errors.New("timeout waiting for HLS manifest")
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func hlsCacheKey(sourceURL string, height int, videoCodec string) string {
+	// Include an explicit version so we can change the on-disk layout/packaging safely.
+	data := fmt.Sprintf("%s|%d|%s|hls_fmp4_aac_v2", sourceURL, height, videoCodec)
+	sum := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func isPlayableHlsManifest(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= 0 {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	text := string(data)
+	if !strings.Contains(text, "#EXTINF:") {
+		return false
+	}
+	if strings.Contains(text, `#EXT-X-MAP:URI="init.mp4"`) {
+		initPath := filepath.Join(filepath.Dir(path), "init.mp4")
+		info, err := os.Stat(initPath)
+		if err != nil || info.Size() <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *muxer) serveHlsManifest(w http.ResponseWriter, r *http.Request, key string, manifestPath string, logPrefix string) {
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		log.Printf("%s failed to read hls manifest path=%s err=%v", logPrefix, manifestPath, err)
+		http.Error(w, "failed to read HLS manifest", http.StatusInternalServerError)
+		return
+	}
+
+	// Many players (including Roku) do not reliably follow redirects for the initial URL,
+	// so serve the manifest directly and rewrite segment URIs to the static file path.
+	basePath := fmt.Sprintf("/hls/hls-%s/", key)
+	manifest := rewriteHlsManifest(string(manifestBytes), basePath)
+
+	m.touchAccess(fmt.Sprintf("hls-%s/index.m3u8", key))
+
+	// Best-effort: surface the selected stream metadata even when serving from cache.
+	selectionPath := filepath.Join(filepath.Dir(manifestPath), "selection.txt")
+	if data, err := os.ReadFile(selectionPath); err == nil {
+		line := strings.TrimSpace(string(data))
+		if line != "" {
+			log.Printf("%s hls selection %s", logPrefix, line)
+			if sel := parseStreamSelection(line); sel != nil {
+				if sel.width > 0 && sel.height > 0 {
+					w.Header().Set("X-Muxer-Video-Resolution", fmt.Sprintf("%dx%d", sel.width, sel.height))
+				}
+				if sel.tbrKbps != "" {
+					w.Header().Set("X-Muxer-Video-Tbr-Kbps", sel.tbrKbps)
+				}
+				if sel.formatID != "" {
+					w.Header().Set("X-Muxer-Format-Id", sel.formatID)
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Muxer-Hls-Key", key)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(manifest))
+	log.Printf("%s served hls manifest key=%s bytes=%d", logPrefix, key, len(manifest))
+}
+
+func rewriteHlsManifest(manifest string, basePath string) string {
+	manifest = strings.ReplaceAll(manifest, "\r\n", "\n")
+	lines := strings.Split(manifest, "\n")
+	for i, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			lines[i] = line
+			continue
+		}
+
+		if strings.HasPrefix(line, "#") {
+			if idx := strings.Index(line, `URI="`); idx != -1 {
+				start := idx + len(`URI="`)
+				end := strings.Index(line[start:], `"`)
+				if end != -1 {
+					end = start + end
+					uri := line[start:end]
+					if uri != "" && !strings.HasPrefix(uri, "http") && !strings.HasPrefix(uri, "/") {
+						uri = basePath + uri
+						line = line[:start] + uri + line[end:]
+					}
+				}
+			}
+			lines[i] = line
+			continue
+		}
+
+		// Segment URI line
+		if strings.HasPrefix(line, "http") || strings.HasPrefix(line, "/") {
+			lines[i] = line
+			continue
+		}
+		lines[i] = basePath + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *muxer) handleHlsFiles() http.Handler {
+	fileServer := http.StripPrefix("/hls/", http.FileServer(http.Dir(m.cfg.CacheDir)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, "/hls/")
+		m.touchAccess(rel)
+		log.Printf("[hls-file] start method=%s path=%s", r.Method, r.URL.Path)
+
+		lowerPath := strings.ToLower(r.URL.Path)
+		if strings.HasSuffix(lowerPath, ".m3u8") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		} else if strings.HasSuffix(lowerPath, ".ts") {
+			w.Header().Set("Content-Type", "video/mp2t")
+		} else if strings.HasSuffix(lowerPath, ".m4s") {
+			w.Header().Set("Content-Type", "video/mp4")
+		} else if strings.HasSuffix(lowerPath, ".mp4") {
+			w.Header().Set("Content-Type", "video/mp4")
+		}
+
+		sw := &statusWriter{ResponseWriter: w}
+		fileServer.ServeHTTP(sw, r)
+		log.Printf("[hls-file] done method=%s path=%s status=%d bytes=%d", r.Method, r.URL.Path, sw.statusCode(), sw.bytesWritten)
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status       int
+	bytesWritten int64
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(p)
+	w.bytesWritten += int64(n)
+	return n, err
+}
+
+func (w *statusWriter) statusCode() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
+
+func (m *muxer) touchAccess(relPath string) {
+	relPath = strings.TrimPrefix(relPath, "/")
+	if relPath == "" {
+		return
+	}
+	parts := strings.Split(relPath, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return
+	}
+	// Only touch for per-job directories (e.g. hls-<key>, <dash-key>).
+	dirName := parts[0]
+	accessPath := filepath.Join(m.cfg.CacheDir, dirName, ".access")
+
+	now := time.Now()
+	if err := os.Chtimes(accessPath, now, now); err == nil {
+		return
+	}
+	if err := os.WriteFile(accessPath, []byte("access\n"), 0644); err != nil {
+		return
+	}
+	_ = os.Chtimes(accessPath, now, now)
 }
 
 func (m *muxer) waitForManifest(job *dashJob, timeout time.Duration, logPrefix string) error {
