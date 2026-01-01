@@ -51,7 +51,13 @@ namespace Http
             end if
 
             m.dashManifest.invidiousInstance = m.invidiousService.GetInstance()
-            m.dashManifest.allowAv1 = m.SupportsAv1()
+            codecSupport = m.GetCodecSupport()
+            m.dashManifest.allowAv1 = codecSupport.av1Dash
+            ' Important: VP9 does NOT work in DASH on Roku, even if device reports support!
+            ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
+            ' VP9 only works in HLS or direct WebM/MKV containers on Roku.
+            m.dashManifest.allowVp9 = false
+            m.dashManifest.allowHevc = codecSupport.hevcDash
 
             qualityFilter = m.CreateQualityFilter(quality)
             xmlContent = m.dashManifest.FromVideoMetadata(metadata, qualityFilter, ValidString(local) = "true")
@@ -104,13 +110,27 @@ namespace Http
             return qualityFilter
         end function
 
-        function SupportsAv1() as boolean
+        function GetCodecSupport() as object
+            result = {
+                av1Dash: false
+                hevcDash: false
+            }
+
             deviceInfo = CreateObject("roDeviceInfo")
             if deviceInfo = invalid
-                return false
+                return result
             end if
 
-            decodeInfo = deviceInfo.CanDecodeVideo({ "codec": "av1", "container": "dash" })
+            result.av1Dash = m.CheckCanDecodeVideo(deviceInfo, "av1", "dash")
+            result.hevcDash = m.CheckCanDecodeVideo(deviceInfo, "hevc", "dash")
+
+            LogDebug("DashRouter codec support:", `av1/dash=${result.av1Dash}, hevc/dash=${result.hevcDash}`)
+
+            return result
+        end function
+
+        function CheckCanDecodeVideo(deviceInfo as object, codec as string, container as string) as boolean
+            decodeInfo = deviceInfo.CanDecodeVideo({ "codec": codec, "container": container })
             if IsBool(decodeInfo)
                 return decodeInfo
             end if

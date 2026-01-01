@@ -22,13 +22,14 @@ Environment variables:
 - MUXER_CACHE_TTL_SECONDS (default 600)
 - MUXER_YTDLP_PATH (default yt-dlp)
 - MUXER_FFMPEG_PATH (default ffmpeg)
-- MUXER_CONTAINER (webm or mkv, default webm)
+- MUXER_CONTAINER (webm, mkv, or hls; default webm)
 - MUXER_YTDLP_JS_RUNTIME (default node; optional override, e.g. deno)
 - MUXER_DASH_SEGMENT_SECONDS (default 4)
 - MUXER_DASH_READY_TIMEOUT_SECONDS (default 60)
 - MUXER_DASH_TRANSCODE (default true; transcodes to H.264/AAC with fMP4 segments for fast start/scrub)
 - MUXER_MAX_VIDEO_TBR_KBPS (default 40000)
-- MUXER_MAX_VIDEO_FPS (default 30)
+- MUXER_MAX_VIDEO_FPS (default 60)
+- MUXER_HLS_SEGMENT_SECONDS (default 6)
 
 ## Request
 
@@ -38,9 +39,18 @@ GET /dash?v=VIDEO_ID&quality=2160p
 
 Optional parameters:
 - url (full source URL instead of v)
-- container (webm or mkv)
+- container (webm, mkv, or hls; hls redirects to the generated HLS playlist)
+
+HLS can also be requested directly:
+
+GET /hls?v=VIDEO_ID&quality=2160p
+
+For best Roku compatibility (explicit extension), you can also use:
+
+GET /mux.m3u8?v=VIDEO_ID&quality=2160p
+GET /hls.m3u8?v=VIDEO_ID&quality=2160p
 
 ## Behavior
 
-- 4k (quality >= 2160): generates DASH manifest + WebM segments in cache; manifest references segments under `/dash/<key>/`; cache kept for TTL.
-- Non-4k: streams live (no cache, no seek).
+- `/dash` and `/mux`: live muxes VP9+Opus into WebM/MKV (no seek/scrub).
+- `/hls` (or `container=hls`): generates an HLS playlist + CMAF/fMP4 segments under `cache/hls-<key>/` (video copied, audio transcoded to AAC), then serves the playlist directly (segment URIs rewritten to `/hls/hls-<key>/...`).

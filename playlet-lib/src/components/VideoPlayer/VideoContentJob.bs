@@ -1,5 +1,6 @@
 import "pkg:/components/Services/Innertube/InnertubeService.bs"
 import "pkg:/components/Services/Invidious/InvidiousService.bs"
+import "pkg:/source/utils/ArrayUtils.bs"
 
 @job("VideoContentJob")
 function ExecuteJob() as void
@@ -161,20 +162,70 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     preferredQuality = preferences["playback.preferred_quality"]
     dashPreferredQuality = preferredQuality
 
-    if Prefers4kQuality(preferredQuality) and not DeviceSupportsAv1Dash()
-        dashPreferredQuality = BuildNon4kQuality(preferredQuality)
-        LogWarnNoTelemetry("4K preferred but device does not support AV1; falling back to non-4K DASH qualities:", dashPreferredQuality)
-    end if
-
+    ' Check device codec support for DASH
+    ' Important: Roku only supports VP9 in WebM/MKV/HLS containers, NOT in DASH!
+    ' Only AV1 and HEVC are supported via DASH for 4K content.
+    ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
+    codecSupport = DeviceSupports4kDash(false) ' Don't force - we need accurate detection
+    
+    ' Check what 4K codecs are actually available in this video's streams
+    available4kCodecs = GetAvailable4kCodecs(metadata)
+    
+    ' For 4K via DASH, we need a MATCHING codec:
+    ' - Device supports AV1 AND video has AV1 4K streams, OR
+    ' - Device supports HEVC AND video has HEVC 4K streams
+    ' VP9 doesn't work in DASH on Roku, only in HLS/WebM containers
+    canUseAv1Dash = codecSupport.av1Dash and available4kCodecs.hasAv1
+    canUseHevcDash = codecSupport.hevcDash and available4kCodecs.hasHevc
+    supportsAv1OrHevcDash = canUseAv1Dash or canUseHevcDash
+    
     LogAvailableVideoSources(metadata)
     LogDeviceVideoCapabilities(metadata)
+    LogInfo(`4K DASH codec support: AV1=${codecSupport.av1Dash}, HEVC=${codecSupport.hevcDash}, VP9/DASH=${codecSupport.vp9Dash} (VP9 not usable in DASH on Roku)`)
+    LogInfo(`Available 4K codecs in video: AV1=${available4kCodecs.hasAv1}, HEVC=${available4kCodecs.hasHevc}, VP9=${available4kCodecs.hasVp9}`)
+    LogInfo(`Can use native 4K DASH: canUseAv1=${canUseAv1Dash}, canUseHevc=${canUseHevcDash}, result=${supportsAv1OrHevcDash}`)
 
     streamUrls = []
-
     hasDrmDash = SupportsDrmDashManifestUrl(metadata)
-    muxerUrl = BuildMuxerUrl(preferences, metadata, preferredQuality)
-    if muxerUrl <> invalid and not hasDrmDash
-        streamUrls.push(muxerUrl)
+    prefers4k = Prefers4kQuality(preferredQuality)
+    muxerUrls = []
+    if prefers4k
+        muxerVcodec = "vp9"
+        if codecSupport.vp9Hls <> true
+            muxerVcodec = "h264"
+        end if
+        LogInfo(`Muxer HLS vcodec selection: prefers4k=${prefers4k}, vp9Hls=${codecSupport.vp9Hls}, h264Hls=${codecSupport.h264Hls}, selected=${muxerVcodec}`)
+        muxerUrls = BuildMuxerUrls(preferences, metadata, preferredQuality, muxerVcodec)
+    end if
+    muxerUrl = muxerUrls.Count() > 0 ? muxerUrls[0] : invalid
+    
+    LogInfo(`Stream URL selection: preferredQuality=${preferredQuality}, prefers4k=${prefers4k}, supportsAv1OrHevcDash=${supportsAv1OrHevcDash}, muxerUrl=${muxerUrl}, hasDrmDash=${hasDrmDash}`)
+
+    ' Strategy for 4K content:
+    ' 1. If device supports AV1/HEVC via DASH → use native DASH (best quality, no server needed)
+    ' 2. If muxer is available → use muxer (outputs VP9 via HLS which Roku supports)
+    ' 3. Fall back to non-4K DASH/HLS
+    ' Note: VP9 is only supported in HLS on Roku, not in DASH or direct WebM streaming
+    ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
+    
+    if prefers4k
+        if supportsAv1OrHevcDash
+            ' Device supports 4K via DASH natively (AV1 or HEVC)
+            LogInfo("Device supports AV1/HEVC via DASH - using native 4K DASH playback")
+            ' dashPreferredQuality keeps 4K
+        else if muxerUrls.Count() > 0
+            ' Use muxer for 4K - prefer HLS packaging (VP9 is not usable via DASH on Roku)
+            LogInfo(`Device doesn't support 4K DASH codecs but muxer is available - using muxer for 4K: ${FormatJson(muxerUrls)}`)
+            for each url in muxerUrls
+                streamUrls.push(url)
+            end for
+            ' Also strip 4K from DASH fallback since device can't play 4K via DASH
+            dashPreferredQuality = BuildNon4kQuality(preferredQuality)
+        else
+            ' No 4K option available - fall back to non-4K
+            dashPreferredQuality = BuildNon4kQuality(preferredQuality)
+            LogWarnNoTelemetry("4K preferred but no 4K playback option available (no AV1/HEVC DASH support, no muxer). Falling back to:", dashPreferredQuality)
+        end if
     end if
 
     if hasDrmDash
@@ -194,6 +245,17 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
             end if
             stream.url = AddInstanceToUrlIfNeeded(stream.url, instance)
             streamUrls.push(stream.url)
+        end for
+    end if
+
+    LogInfo(`Final stream URLs (${streamUrls.Count()}): ${FormatJson(streamUrls)}`)
+    
+    ' Add muxer as fallback if it wasn't already added as primary
+    if muxerUrls.Count() > 0 and not hasDrmDash and streamUrls.Count() > 0
+        for each url in muxerUrls
+            if ArrayUtils.IndexOfString(streamUrls, url) = -1
+                streamUrls.push(url)
+            end if
         end for
     end if
 
@@ -224,6 +286,47 @@ function BuildNon4kQuality(preferredQuality as dynamic) as string
     end if
 
     return filtered.Join(",")
+end function
+
+function GetAvailable4kCodecs(metadata as object) as object
+    result = {
+        hasAv1: false
+        hasHevc: false
+        hasVp9: false
+    }
+    
+    adaptiveFormats = ValidArray(metadata.adaptiveFormats)
+    
+    for each fmt in adaptiveFormats
+        mimeType = ValidString(fmt["type"])
+        if StringUtils.IsNullOrEmpty(mimeType) or not mimeType.StartsWith("video/")
+            continue for
+        end if
+        
+        ' Check if this is a 4K stream (2160p)
+        qualityLabel = LCase(ValidString(fmt["qualityLabel"]))
+        resolution = ValidString(fmt["resolution"])
+        is4k = qualityLabel.InStr("2160") <> -1 or resolution.InStr("2160") <> -1 or resolution.InStr("3840") <> -1
+        
+        if not is4k
+            continue for
+        end if
+        
+        ' Parse the codec from mime type
+        parsed = ParseMimeType(mimeType)
+        codec = LCase(parsed.codec)
+        
+        ' Check codec type
+        if codec.InStr("av01") <> -1 or codec.InStr("av1") <> -1
+            result.hasAv1 = true
+        else if codec.InStr("hvc1") <> -1 or codec.InStr("hev1") <> -1 or codec.InStr("hevc") <> -1 or codec.InStr("h265") <> -1
+            result.hasHevc = true
+        else if codec.InStr("vp9") <> -1 or codec.InStr("vp09") <> -1
+            result.hasVp9 = true
+        end if
+    end for
+    
+    return result
 end function
 
 function LogAvailableVideoSources(metadata as object) as void
@@ -422,14 +525,16 @@ function FormatDecodeInfo(value as dynamic) as string
     return ToString(value)
 end function
 
-function BuildMuxerUrl(preferences as object, metadata as object, preferredQuality as dynamic) as dynamic
+function BuildMuxerUrl(preferences as object, metadata as object, preferredQuality as dynamic, container = "webm" as string, vcodec = "" as string) as dynamic
     muxerBaseUrl = ValidString(preferences["playback.muxer_base_url"])
     muxerBaseUrl = muxerBaseUrl.Trim()
     if StringUtils.IsNullOrEmpty(muxerBaseUrl)
+        LogDebug("BuildMuxerUrl: muxer_base_url is not configured")
         return invalid
     end if
 
     if not Prefers4kQuality(preferredQuality)
+        LogDebug(`BuildMuxerUrl: preferredQuality=${preferredQuality} does not include 4K`)
         return invalid
     end if
 
@@ -438,12 +543,20 @@ function BuildMuxerUrl(preferences as object, metadata as object, preferredQuali
         return invalid
     end if
 
-    if muxerBaseUrl.Len() >= 5 and muxerBaseUrl.Right(5) = "/dash"
+    ' Try HLS endpoint first (VP9 works in HLS on Roku), fall back to /mux with WebM.
+    ' Note: For HLS playback we prefer an endpoint ending in .m3u8 so Roku reliably detects the format.
+    if muxerBaseUrl.Len() >= 4 and muxerBaseUrl.Right(4) = "/hls"
         muxerUrl = muxerBaseUrl
+        useHls = true
+    else if muxerBaseUrl.Len() >= 5 and muxerBaseUrl.Right(5) = "/dash"
+        muxerUrl = muxerBaseUrl.Left(muxerBaseUrl.Len() - 5) + "/mux"
+        useHls = false
     else if muxerBaseUrl.Len() >= 4 and muxerBaseUrl.Right(4) = "/mux"
         muxerUrl = muxerBaseUrl
+        useHls = false
     else
         muxerUrl = StringUtils.PathJoin(muxerBaseUrl, "mux")
+        useHls = false
     end if
 
     videoId = metadata.videoId
@@ -451,11 +564,49 @@ function BuildMuxerUrl(preferences as object, metadata as object, preferredQuali
         return invalid
     end if
 
-    return UrlUtils.AppendQueryParams(muxerUrl, {
+    container = LCase(container.Trim())
+    if container <> "webm" and container <> "mkv" and container <> "hls"
+        container = "webm"
+    end if
+
+    vcodec = LCase(ValidString(vcodec).Trim())
+
+    if container = "hls"
+        if muxerUrl.Len() >= 4 and muxerUrl.Right(4) = "/hls"
+            muxerUrl = muxerUrl + ".m3u8"
+        else if muxerUrl.Len() >= 4 and muxerUrl.Right(4) = "/mux"
+            muxerUrl = muxerUrl + ".m3u8"
+        end if
+    end if
+
+    params = {
         v: videoId
         quality: "2160p"
-        container: "webm"
-    })
+        container: container
+    }
+
+    if container = "hls" and not StringUtils.IsNullOrEmpty(vcodec)
+        params.vcodec = vcodec
+    end if
+    
+    LogInfo(`BuildMuxerUrl: using endpoint=${muxerUrl}, useHls=${useHls}, container=${container}`)
+    return UrlUtils.AppendQueryParams(muxerUrl, params)
+end function
+
+function BuildMuxerUrls(preferences as object, metadata as object, preferredQuality as dynamic, muxerVcodec = "" as string) as object
+    urls = []
+
+    hlsUrl = BuildMuxerUrl(preferences, metadata, preferredQuality, "hls", muxerVcodec)
+    if hlsUrl <> invalid
+        urls.push(hlsUrl)
+    end if
+
+    webmUrl = BuildMuxerUrl(preferences, metadata, preferredQuality, "webm")
+    if webmUrl <> invalid and webmUrl <> hlsUrl
+        urls.push(webmUrl)
+    end if
+
+    return urls
 end function
 
 function NormalizeMuxerBaseUrl(url as string) as string
@@ -500,13 +651,62 @@ function Prefers4kQuality(preferredQuality as dynamic) as boolean
     return false
 end function
 
-function DeviceSupportsAv1Dash() as boolean
+function DeviceSupports4kDash(runDiagnostics = false as boolean) as object
+    result = {
+        av1Dash: false
+        vp9Dash: false
+        vp9Webm: false
+        vp9Hls: false
+        hevcDash: false
+        h264Hls: false
+    }
+
     deviceInfo = CreateObject("roDeviceInfo")
     if deviceInfo = invalid
-        return false
+        return result
     end if
 
-    decodeInfo = deviceInfo.CanDecodeVideo({ "codec": "av1", "container": "dash" })
+    ' Run extended diagnostics if requested
+    if runDiagnostics
+        LogExtendedCodecDiagnostics()
+    end if
+
+    ' Check AV1 via DASH - this is the primary 4K codec for DASH on Roku
+    result.av1Dash = CheckCanDecodeVideo(deviceInfo, "av1", "dash")
+
+    ' Check VP9 via DASH - Note: Even if this returns true, Roku doesn't actually
+    ' support VP9 in DASH containers per their streaming specs. VP9 only works
+    ' in WebM/MKV containers or via HLS.
+    ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
+    result.vp9Dash = CheckCanDecodeVideo(deviceInfo, "vp9", "dash")
+
+    ' Check VP9 via webm - this indicates VP9 hardware support
+    ' The muxer uses WebM container for VP9 which works on Roku
+    result.vp9Webm = CheckCanDecodeVideo(deviceInfo, "vp9", "webm")
+
+    ' Check VP9 via HLS (some devices support VP9 only via HLS packaging)
+    result.vp9Hls = CheckCanDecodeVideo(deviceInfo, "vp9", "hls")
+
+    ' Check HEVC/H.265 via DASH
+    result.hevcDash = CheckCanDecodeVideo(deviceInfo, "hevc", "dash")
+
+    ' Check H.264 via HLS (fallback when VP9 isn't decodable)
+    result.h264Hls = CheckCanDecodeVideo(deviceInfo, "h264", "hls")
+    if not result.h264Hls
+        result.h264Hls = CheckCanDecodeVideo(deviceInfo, "avc1", "hls")
+    end if
+
+    LogDebug("Device codec support:", `av1/dash=${result.av1Dash}, vp9/dash=${result.vp9Dash}, vp9/webm=${result.vp9Webm}, vp9/hls=${result.vp9Hls}, hevc/dash=${result.hevcDash}, h264/hls=${result.h264Hls}`)
+
+    return result
+end function
+
+function CheckCanDecodeVideo(deviceInfo as object, codec as string, container as string) as boolean
+    decodeInfo = deviceInfo.CanDecodeVideo({ "codec": codec, "container": container })
+    
+    ' Log the raw result for debugging
+    LogDebug(`CanDecodeVideo(codec=${codec}, container=${container}) returned:`, ToString(decodeInfo))
+    
     if IsBool(decodeInfo)
         return decodeInfo
     end if
@@ -516,6 +716,56 @@ function DeviceSupportsAv1Dash() as boolean
     end if
 
     return false
+end function
+
+' Comprehensive codec diagnostics - call this to dump all relevant codec support info
+function LogExtendedCodecDiagnostics() as void
+    deviceInfo = CreateObject("roDeviceInfo")
+    if deviceInfo = invalid
+        LogWarn("Cannot get roDeviceInfo for codec diagnostics")
+        return
+    end if
+
+    LogInfo("=== Extended Codec Diagnostics ===")
+    
+    ' Device info
+    LogInfo(`Device Model: ${deviceInfo.GetModel()}`)
+    LogInfo(`Model Display Name: ${deviceInfo.GetModelDisplayName()}`)
+    
+    ' Test various codec/container combinations
+    codecs = ["vp9", "vp09", "av1", "av01", "hevc", "hvc1", "hev1", "h264", "avc1"]
+    containers = ["dash", "webm", "mp4", "mkv", "hls"]
+    
+    for each codec in codecs
+        for each container in containers
+            result = deviceInfo.CanDecodeVideo({ "codec": codec, "container": container })
+            LogInfo(`CanDecodeVideo(${codec}/${container}): ${ToString(result)}`)
+        end for
+    end for
+    
+    ' Also try with profile/level for VP9
+    vp9Profiles = [
+        { "codec": "vp9", "container": "webm" }
+        { "codec": "vp9", "container": "webm", "profile": "0" }
+        { "codec": "vp9", "container": "webm", "profile": "2" }
+        { "codec": "vp9", "container": "dash", "profile": "0" }
+        { "codec": "vp9", "container": "dash", "profile": "2" }
+        { "codec": "vp9", "container": "mp4" }
+    ]
+    
+    LogInfo("=== VP9 Profile Tests ===")
+    for each opts in vp9Profiles
+        result = deviceInfo.CanDecodeVideo(opts)
+        LogInfo(`CanDecodeVideo(${FormatJson(opts)}): ${ToString(result)}`)
+    end for
+    
+    LogInfo("=== End Codec Diagnostics ===")
+end function
+
+' Keep the old function name for backward compatibility in DashRouter
+function DeviceSupportsAv1Dash() as boolean
+    result = DeviceSupports4kDash()
+    return result.av1Dash
 end function
 
 function SupportsHls(metadata as object) as boolean
