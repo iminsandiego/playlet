@@ -47,6 +47,7 @@ function Init()
     m.videoPlayingSuccess = false
     m.ignoreNextFinishedState = false
     m.isSeekingPosition = false
+    m.speedRestartPending = false
 
     m.statsOverlayEnabled = false
     m.statsResolution = ""
@@ -120,6 +121,7 @@ function OnNodeReady()
 
     ' Right feature buttons
     DisposableObserveFieldScoped(m.qualityButton, "buttonSelected", FuncName(OnQualityButtonSelected))
+    DisposableObserveFieldScoped(m.speedButton, "buttonSelected", FuncName(OnSpeedButtonSelected))
     DisposableObserveFieldScoped(m.ccButton, "buttonSelected", FuncName(OnCCButtonSelected))
     DisposableObserveFieldScoped(m.statsButton, "buttonSelected", FuncName(OnStatsButtonSelected))
     DisposableObserveFieldScoped(m.bookmarkButton, "buttonSelected", FuncName(OnBookmarkButtonSelected))
@@ -134,6 +136,7 @@ function OnNodeReady()
     SetupNavigation()
     SetupStatsOverlay()
     SetupQualityButton()
+    SetupSpeedButton()
     SponsorBlock.SetupSponsorBlock()
 
     if m.top.hasFocus() and m.videoUi.visible and m.videoUi.opacity = 1
@@ -144,7 +147,7 @@ end function
 function SetupNavigation()
     ' Linear navigation through all buttons (left to right):
     ' PreviousButton <-> SkipBackButton <-> PlayButton <-> SkipForwardButton <-> NextButton <->
-    ' QualityButton <-> CCButton <-> StatsButton <-> BookmarkButton <-> MinimizeButton
+    ' QualityButton <-> SpeedButton <-> CCButton <-> StatsButton <-> BookmarkButton <-> MinimizeButton
 
     ' Center playback buttons
     SetNavigation(m.previousButton, RemoteKeys.Right, m.skipBackButton)
@@ -160,25 +163,34 @@ function SetupNavigation()
     SetNavigation(m.skipForwardButton, RemoteKeys.Left, m.playButton)
     SetNavigation(m.skipForwardButton, RemoteKeys.Right, m.nextButton)
     SetNavigation(m.skipForwardButton, RemoteKeys.Right, m.qualityButton) ' fallback
+    SetNavigation(m.skipForwardButton, RemoteKeys.Right, m.speedButton) ' fallback
     SetNavigation(m.skipForwardButton, RemoteKeys.Right, m.ccButton) ' fallback
 
     SetNavigation(m.nextButton, RemoteKeys.Left, m.skipForwardButton)
     SetNavigation(m.nextButton, RemoteKeys.Left, m.playButton) ' fallback
     SetNavigation(m.nextButton, RemoteKeys.Right, m.qualityButton)
+    SetNavigation(m.nextButton, RemoteKeys.Right, m.speedButton) ' fallback
     SetNavigation(m.nextButton, RemoteKeys.Right, m.ccButton) ' fallback
 
     ' Right feature buttons
     SetNavigation(m.qualityButton, RemoteKeys.Left, m.nextButton)
     SetNavigation(m.qualityButton, RemoteKeys.Left, m.skipForwardButton) ' fallback
-    SetNavigation(m.qualityButton, RemoteKeys.Right, m.ccButton)
+    SetNavigation(m.qualityButton, RemoteKeys.Right, m.speedButton)
 
-    SetNavigation(m.ccButton, RemoteKeys.Left, m.qualityButton)
+    SetNavigation(m.speedButton, RemoteKeys.Left, m.qualityButton)
+    SetNavigation(m.speedButton, RemoteKeys.Left, m.nextButton) ' fallback
+    SetNavigation(m.speedButton, RemoteKeys.Left, m.skipForwardButton) ' fallback
+    SetNavigation(m.speedButton, RemoteKeys.Right, m.ccButton)
+
+    SetNavigation(m.ccButton, RemoteKeys.Left, m.speedButton)
+    SetNavigation(m.ccButton, RemoteKeys.Left, m.qualityButton) ' fallback
     SetNavigation(m.ccButton, RemoteKeys.Left, m.nextButton) ' fallback
     SetNavigation(m.ccButton, RemoteKeys.Left, m.skipForwardButton) ' fallback
     SetNavigation(m.ccButton, RemoteKeys.Right, m.statsButton)
     SetNavigation(m.ccButton, RemoteKeys.Right, m.bookmarkButton) ' fallback
 
     SetNavigation(m.statsButton, RemoteKeys.Left, m.ccButton)
+    SetNavigation(m.statsButton, RemoteKeys.Left, m.speedButton) ' fallback
     SetNavigation(m.statsButton, RemoteKeys.Left, m.qualityButton) ' fallback
     SetNavigation(m.statsButton, RemoteKeys.Right, m.bookmarkButton)
     SetNavigation(m.statsButton, RemoteKeys.Right, m.minimizeButton) ' fallback
@@ -189,6 +201,9 @@ function SetupNavigation()
 
     SetNavigation(m.minimizeButton, RemoteKeys.Left, m.bookmarkButton)
     SetNavigation(m.minimizeButton, RemoteKeys.Left, m.statsButton) ' fallback
+
+    ' Ensure we don't dead-end on Quality if Speed is disabled
+    UpdateFeatureButtonsNavigationForSpeed()
 end function
 
 function SetupQualityButton() as void
@@ -203,6 +218,127 @@ function SetupQualityButton() as void
     end if
 
     OnPreferredQualityChange()
+end function
+
+function SetupSpeedButton() as void
+    if m.speedButton = invalid
+        return
+    end if
+
+    if m.top.preferences <> invalid
+        DisposableObserveFieldScoped(m.top.preferences, "playback.speed", FuncName(OnPlaybackSpeedChange))
+    end if
+
+    OnPlaybackSpeedChange()
+    UpdateSpeedButtonAvailability()
+end function
+
+function UpdateSpeedButtonAvailability() as void
+    if m.speedButton = invalid
+        return
+    end if
+
+    supported = (m.top.preferences <> invalid) and IsSpeedSupportedForCurrentContent()
+    m.speedButton.disabled = not supported
+    if not supported
+        drmType = "<none>"
+        hasDrmParams = false
+        content = m.top.content
+        if content <> invalid and content.DoesExist("drmParams") and content.drmParams <> invalid
+            hasDrmParams = true
+            drmType = Type(content.drmParams)
+        end if
+        LogInfo(`Speed button disabled: prefsValid=${m.top.preferences <> invalid}, hasDrmParams=${hasDrmParams}, drmParamsType=${drmType}`)
+    end if
+    UpdateFeatureButtonsNavigationForSpeed()
+end function
+
+function IsSpeedSupportedForCurrentContent() as boolean
+    content = m.top.content
+    ' Allow the button to be usable even if content is temporarily unavailable.
+    ' We'll only hard-disable for DRM content.
+    if content = invalid
+        return true
+    end if
+
+    ' Disable speed for DRM (Widevine) content
+    if content.DoesExist("drmParams") and content.drmParams <> invalid
+        drm = content.drmParams
+        ' Treat as DRM only when the object actually contains a usable DRM config.
+        ' Some builds/devices may populate drmParams with unexpected types; don't pessimistically disable.
+        if IsAssociativeArray(drm)
+            keySystem = ValidString(drm.keySystem)
+            licenseServerURL = ValidString(drm.licenseServerURL)
+            if not StringUtils.IsNullOrEmpty(keySystem) or not StringUtils.IsNullOrEmpty(licenseServerURL)
+                return false
+            end if
+            return true
+        end if
+
+        ' Handle SG-node DRM config as well (best-effort)
+        if GetInterface(drm, "ifSGNodeDict") <> invalid
+            keySystem = ""
+            licenseServerURL = ""
+            if drm.hasField("keySystem")
+                keySystem = ValidString(drm.keySystem)
+            end if
+            if drm.hasField("licenseServerURL")
+                licenseServerURL = ValidString(drm.licenseServerURL)
+            end if
+            if not StringUtils.IsNullOrEmpty(keySystem) or not StringUtils.IsNullOrEmpty(licenseServerURL)
+                return false
+            end if
+            return true
+        end if
+
+        ' Unknown type - allow speed but log once at INFO level
+        LogInfo(`Unexpected drmParams type for content; allowing speed: ${Type(drm)}`)
+        return true
+    end if
+
+    return true
+end function
+
+function UpdateFeatureButtonsNavigationForSpeed() as void
+    ' If Speed is disabled/non-focusable, route Quality -> CC so navigation doesn't dead-end.
+    if m.qualityButton = invalid or m.ccButton = invalid or m.speedButton = invalid
+        return
+    end if
+
+    if m.speedButton.disabled
+        SetNavigation(m.qualityButton, RemoteKeys.Right, m.ccButton)
+        SetNavigation(m.ccButton, RemoteKeys.Left, m.qualityButton)
+    else
+        SetNavigation(m.qualityButton, RemoteKeys.Right, m.speedButton)
+        SetNavigation(m.speedButton, RemoteKeys.Left, m.qualityButton)
+        SetNavigation(m.speedButton, RemoteKeys.Right, m.ccButton)
+        SetNavigation(m.ccButton, RemoteKeys.Left, m.speedButton)
+    end if
+end function
+
+function OnPlaybackSpeedChange() as void
+    if m.speedButton = invalid
+        return
+    end if
+
+    value = ""
+    if m.top.preferences <> invalid
+        value = ValidString(m.top.preferences["playback.speed"])
+    end if
+
+    m.speedButton.text = FormatSpeedButtonLabel(value)
+end function
+
+function FormatSpeedButtonLabel(value as string) as string
+    if StringUtils.IsNullOrEmpty(value)
+        value = "1.0"
+    end if
+
+    if value.EndsWith("x")
+        return value
+    end if
+
+    return value + "x"
 end function
 
 function OnPreferredQualityChange() as void
@@ -330,6 +466,7 @@ function OnVideoContentJobDone(event as object) as void
 
     ' Update UI with metadata
     UpdateUiFromMetadata(content)
+    UpdateSpeedButtonAvailability()
 
     metadata = content.metadata
     SponsorBlock.FetchSponsorBlock(metadata)
@@ -614,7 +751,17 @@ function OnVideoPlayerStateChange() as void
     end if
 
     if state = "stopping" or state = "stopped"
-        m.videoUi.visible = false
+        if m.speedRestartPending = true
+            ' Keep UI visible while applying speed (we'll restart playback once fully stopped)
+            m.videoUi.visible = true
+
+            if state = "stopped"
+                m.speedRestartPending = false
+                StartVideoContentJob(content)
+            end if
+        else
+            m.videoUi.visible = false
+        end if
         return
     end if
 
@@ -976,6 +1123,94 @@ function OnQualityButtonSelected() as void
     LogInfo("Quality changed to:", newValue)
 end function
 
+function OnSpeedButtonSelected() as void
+    StartHideVideoUiTimer()
+
+    if m.speedButton = invalid or m.speedButton.disabled
+        LogInfo("Speed button selected but is unavailable (invalid/disabled)")
+        return
+    end if
+
+    if m.top.preferences = invalid
+        LogWarn("Cannot change playback speed: preferences node is invalid")
+        return
+    end if
+
+    if not IsSpeedSupportedForCurrentContent()
+        LogWarn("Cannot change playback speed: unsupported content (DRM)")
+        return
+    end if
+
+    LogInfo("Opening SpeedSelector")
+    selector = CreateObject("roSGNode", "SpeedSelector")
+    m.top.appController@.PushScreen(selector)
+    LogInfo("SpeedSelector pushed")
+    selector@.BindNode()
+    LogInfo("SpeedSelector bound")
+
+    selector.returnFocusNode = m.speedButton
+
+    currentValue = ValidString(m.top.preferences["playback.speed"])
+    if StringUtils.IsNullOrEmpty(currentValue)
+        currentValue = "1.0"
+    end if
+    selector.value = currentValue
+    selector.observeField("save", FuncName(OnSaveSpeedSelector))
+end function
+
+function OnSaveSpeedSelector(event as object) as void
+    editor = event.GetRoSGNode()
+    if editor = invalid or m.top.preferences = invalid
+        return
+    end if
+
+    newValue = ValidString(editor.value)
+    if StringUtils.IsNullOrEmpty(newValue)
+        newValue = "1.0"
+    end if
+
+    m.top.preferences["playback.speed"] = newValue
+    UpdateSpeedButtonAvailability()
+
+    RestartPlaybackForSpeedChange()
+end function
+
+function RestartPlaybackForSpeedChange() as void
+    if m.top.preferences = invalid
+        return
+    end if
+    if not IsSpeedSupportedForCurrentContent()
+        return
+    end if
+
+    content = m.top.content
+    if content = invalid
+        return
+    end if
+
+    position = CInt(m.top.position)
+    if position < 0
+        position = 0
+    end if
+    content.timestamp = position
+
+    ' Treat this as a fresh playback attempt so initial retry logic still applies
+    m.videoPlayingSuccess = false
+
+    ' Keep UI visible during restart (OnVideoPlayerStateChange would otherwise hide it on stop)
+    m.videoUi.visible = true
+    m.top.playerUiState = PlayerUiState.Visible
+
+    state = ValidString(m.top.state)
+    if state = "stopped" or state = "none"
+        StartVideoContentJob(content)
+        return
+    end if
+
+    m.speedRestartPending = true
+    m.top.control = "stop"
+end function
+
 function OnCCButtonSelected()
     StartHideVideoUiTimer()
     m.ccEnabled = not m.ccEnabled
@@ -1194,6 +1429,22 @@ function UpdateStatsOverlay() as void
         if StringUtils.IsNullOrEmpty(m.statsResolution)
             m.statsResolution = quality
         end if
+    end if
+
+    prefSpeed = "1.0"
+    if m.top.preferences <> invalid
+        prefSpeed = ValidString(m.top.preferences["playback.speed"])
+    end if
+    urlSpeed = ExtractQueryValue(query, "speed")
+    if StringUtils.IsNullOrEmpty(urlSpeed)
+        urlSpeed = "1.0"
+    end if
+    prefSpeedLabel = FormatSpeedButtonLabel(prefSpeed)
+    urlSpeedLabel = FormatSpeedButtonLabel(urlSpeed)
+    if prefSpeedLabel <> urlSpeedLabel
+        lines.Push(`Speed: ${prefSpeedLabel} (url=${urlSpeedLabel})`)
+    else
+        lines.Push(`Speed: ${prefSpeedLabel}`)
     end if
 
     videoFormat = ValidString(m.top.videoFormat)

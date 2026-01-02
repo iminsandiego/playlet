@@ -1,0 +1,58 @@
+<component name="SpeedSelector" extends="Group" includes="AutoBind,Focus">
+    <interface>
+        <field id="value" type="string" onChange="OnValueChange" />
+        <field id="save" type="boolean" alwaysNotify="true" />
+        <field id="appController" type="node" bind="/AppController" />
+        <field id="returnFocusNode" type="node" />
+    </interface>
+    <children>
+        <Rectangle
+            width="1280"
+            height="720"
+            color="#000000"
+            opacity="0.5">
+        </Rectangle>
+        <Rectangle
+            width="520"
+            height="520"
+            translation="[380,100]"
+            color="#242424">
+            <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+            <Label text="Playback speed" width="520" height="40" translation="[0,20]" font="font:MediumBoldSystemFont" horizAlign="center" />
+            <RadioButtonList
+                id="speedList"
+                vertFocusAnimationStyle="floatingFocus"
+                itemSize="[240,46]"
+                translation="[140,90]">
+                <ContentNode role="content">
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="0.5" title="0.5x" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="0.75" title="0.75x" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="1.0" title="1.0x" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="1.25" title="1.25x" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="1.5" title="1.5x" />
+                    <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
+                    <ContentNode id="2.0" title="2.0x" />
+                </ContentNode>
+            </RadioButtonList>
+
+            <ButtonEx
+                id="saveButton"
+                iconVisible="false"
+                text="Save"
+                padding="[30,30]"
+                translation="[150,440]" />
+            <ButtonEx
+                id="closeButton"
+                iconVisible="false"
+                text="Close"
+                padding="[30,30]"
+                translation="[290,440]" />
+        </Rectangle>
+    </children>
+</component>
+

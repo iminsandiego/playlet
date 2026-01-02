@@ -73,9 +73,9 @@ namespace SponsorBlock
         end if
     end function
 
-    function PositionChapterLabel(bar as object)
+    function PositionChapterLabel(bar as object) as boolean
         if bar = invalid
-            return
+            return false
         end if
         m.chapterLabel = m.top.findNode("chapterLabel")
         ' We move the chapter label under the custom trickplay bar
@@ -83,12 +83,13 @@ namespace SponsorBlock
         m.chapterLabel.reparent(bar, false)
         trickPlayBarWidth = bar.boundingRect().width
         m.chapterLabel.translation = [trickPlayBarWidth / 4 - m.chapterLabel.width / 2, 25]
+        return true
     end function
 
-    function OnTrickPlayBarVisible()
+    function OnTrickPlayBarVisible() as boolean
         bar = m.sponsorBlockTrickPlayBar
         if bar = invalid
-            return
+            return false
         end if
 
         if bar.visible
@@ -97,6 +98,7 @@ namespace SponsorBlock
         else
             m.chapterLabelTimer.control = "stop"
         end if
+        return true
     end function
 
     function OnChapterLabelTimer() as void
@@ -120,7 +122,9 @@ namespace SponsorBlock
     end function
 
     function GetCurrentChapterTime() as dynamic
-        if m.sponsorBlockTrickPlayBar = m.trickPlayBar
+        sponsorBar = m.sponsorBlockTrickPlayBar
+        defaultBar = m.trickPlayBar
+        if sponsorBar <> invalid and defaultBar <> invalid and sponsorBar.isSameNode(defaultBar)
             return m.top.position
         end if
         if m.top.hasField("trickPlayPosition")

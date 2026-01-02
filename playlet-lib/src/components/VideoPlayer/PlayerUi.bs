@@ -43,6 +43,7 @@ function FindUiNodes()
 
     ' Right feature buttons
     m.qualityButton = m.top.findNode("QualityButton")
+    m.speedButton = m.top.findNode("SpeedButton")
     m.ccButton = m.top.findNode("CCButton")
     m.statsButton = m.top.findNode("StatsButton")
     m.bookmarkButton = m.top.findNode("BookmarkButton")
