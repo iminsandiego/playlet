@@ -1,0 +1,11 @@
+{
+  inputHash: '0a37257cee1b432a81b8cae330c4edba',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/bookmark.png',
+      outputHash: 'eb0c016f681242ca80806799bf919477',
+      width: 126,
+      height: 126,
+    },
+  ],
+}

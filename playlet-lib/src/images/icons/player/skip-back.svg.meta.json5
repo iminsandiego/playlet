@@ -1,0 +1,11 @@
+{
+  inputHash: '221a698645f4e3bb2fc27dd4adbc67b3',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/skip-back.png',
+      outputHash: '998e5fd9576be6af31b474fd42c3247b',
+      width: 126,
+      height: 126,
+    },
+  ],
+}
