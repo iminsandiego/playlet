@@ -1,0 +1,11 @@
+{
+  inputHash: '0593e14c6921eefa3f80516a56b1c288',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/skip-forward.png',
+      outputHash: '426fd1d88957dd2e59319e2f1ed370b8',
+      width: 126,
+      height: 126,
+    },
+  ],
+}
