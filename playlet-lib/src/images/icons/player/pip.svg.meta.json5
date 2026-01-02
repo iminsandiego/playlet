@@ -1,0 +1,11 @@
+{
+  inputHash: '9a8062da08c8e5af5cc459ffefbf98a9',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/pip.png',
+      outputHash: 'ad6ae1e5b7be4a56071e76524760db2d',
+      width: 126,
+      height: 126,
+    },
+  ],
+}
