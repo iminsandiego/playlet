@@ -1,0 +1,678 @@
+import "pkg:/components/Web/WebServer/Http/HttpRouter.bs"
+import "pkg:/source/services/HttpClient.bs"
+import "pkg:/source/utils/Logging.bs"
+import "pkg:/source/utils/StringUtils.bs"
+import "pkg:/source/utils/Types.bs"
+import "pkg:/source/utils/UrlUtils.bs"
+
+namespace Http
+
+    class MediaRouter extends HttpRouter
+        function new(_server as object)
+            super()
+            m.fs = CreateObject("roFileSystem")
+            if m.fs <> invalid
+                m.fs.CreateDirectory("tmp:/media_proxy")
+            end if
+            m.counter = 0
+        end function
+
+        @get("/api/media")
+        function ProxyMedia(context as object) as boolean
+            request = context.request
+            response = context.response
+
+            baseUrl = request.query.url
+            if StringUtils.IsNullOrEmpty(baseUrl)
+                response.Default(400, "Missing url")
+                return true
+            end if
+
+            sq = request.query.sq
+            upstreamUrl = baseUrl
+            if not StringUtils.IsNullOrEmpty(sq)
+                upstreamUrl = UrlUtils.AppendQueryParams(upstreamUrl, { sq: sq })
+            end if
+
+            speed = m.NormalizeSpeed(request.query.speed)
+            factor = 1.0 / speed
+            kind = LCase(ValidString(request.query.kind))
+            LogInfo(`Media proxy: kind=${kind}, speed=${speed}, range=${ToString(m.GetHeaderValue(request.headers, "Range"))}`)
+
+            headers = request.headers
+            rangeHeader = m.GetHeaderValue(headers, "Range")
+
+            ' Host is probably 127.0.0.1:<port> so we should change it before hitting the server
+            parsedUrl = UrlUtils.ParseUrl(upstreamUrl)
+            if parsedUrl <> invalid
+                headers["Host"] = parsedUrl.host + ":" + parsedUrl.port
+            end if
+
+            m.counter = ValidInt(m.counter) + 1
+            filePath = `tmp:/media_proxy/${m.counter}.bin`
+            DeleteFile(filePath)
+
+            httpReq = HttpClient.Get(upstreamUrl).NoCache().ToFile(filePath)
+            httpReq.Headers(headers)
+            httpRes = httpReq.Await()
+
+            if not httpRes.IsSuccess()
+                LogError("Failed to proxy media:", httpRes.ErrorMessage(false))
+                response.Redirect(upstreamUrl)
+                DeleteFile(filePath)
+                return true
+            end if
+
+            buffer = CreateObject("roByteArray")
+            if buffer = invalid or not buffer.ReadFile(filePath)
+                LogError("Failed to read proxied media file:", filePath)
+                response.Redirect(upstreamUrl)
+                DeleteFile(filePath)
+                return true
+            end if
+            DeleteFile(filePath)
+
+            if speed <> 1.0 and m.RangeStartsAtZero(rangeHeader)
+                if kind = "init"
+                    patched = m.ScaleFmp4InitTimes(buffer, factor)
+                    if patched
+                        LogDebug(`Patched fMP4 init times: speed=${speed}, factor=${factor}, bytes=${buffer.Count()}`)
+                    else
+                        LogWarn(`Failed to patch fMP4 init times (pass-through): speed=${speed}, bytes=${buffer.Count()}`)
+                    end if
+                else
+                    patched = m.ScaleFmp4FragmentTimes(buffer, factor)
+                    if patched
+                        LogDebug(`Patched fMP4 fragment times: speed=${speed}, factor=${factor}, bytes=${buffer.Count()}`)
+                    else
+                        LogWarn(`Failed to patch fMP4 fragment times (pass-through): speed=${speed}, bytes=${buffer.Count()}`)
+                    end if
+                end if
+            end if
+
+            upstreamHeaders = httpRes.Headers()
+
+            response.http_code = httpRes.StatusCode()
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+
+            contentType = upstreamHeaders["Content-Type"]
+            if not StringUtils.IsNullOrEmpty(contentType)
+                response.headers["Content-Type"] = contentType
+            else
+                response.headers["Content-Type"] = "application/octet-stream"
+            end if
+
+            contentRange = upstreamHeaders["Content-Range"]
+            if not StringUtils.IsNullOrEmpty(contentRange)
+                response.headers["Content-Range"] = contentRange
+            end if
+
+            acceptRanges = upstreamHeaders["Accept-Ranges"]
+            if not StringUtils.IsNullOrEmpty(acceptRanges)
+                response.headers["Accept-Ranges"] = acceptRanges
+            else
+                response.headers["Accept-Ranges"] = "bytes"
+            end if
+
+            response.SetBodyDataBuffer(buffer)
+            return true
+        end function
+
+        ' ---------------------------
+        ' fMP4 init scaling (moov/mvex/trex)
+        ' ---------------------------
+        function ScaleFmp4InitTimes(buf as object, factor as double) as boolean
+            if buf = invalid or buf.Count() < 8
+                return false
+            end if
+            if factor <= 0 or factor = 1.0
+                return true
+            end if
+
+            patched = false
+            cursor = 0
+            total = buf.Count()
+
+            while cursor + 8 <= total
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > total
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = total - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > total
+                    exit while
+                end if
+
+                if boxType = "moov"
+                    if m.ScaleMoov(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleMoov(buf as object, startPos as integer, endPos as integer, factor as double) as boolean
+            patched = false
+            cursor = startPos
+
+            while cursor + 8 <= endPos
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > endPos
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = endPos - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > endPos
+                    exit while
+                end if
+
+                if boxType = "mvex"
+                    if m.ScaleMvex(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleMvex(buf as object, startPos as integer, endPos as integer, factor as double) as boolean
+            patched = false
+            cursor = startPos
+
+            while cursor + 8 <= endPos
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > endPos
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = endPos - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > endPos
+                    exit while
+                end if
+
+                if boxType = "trex"
+                    if m.ScaleTrex(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleTrex(buf as object, contentStart as integer, boxEnd as integer, factor as double) as boolean
+            ' trex is a FullBox:
+            ' version(1) + flags(3) + track_ID(4) + default_sample_description_index(4) +
+            ' default_sample_duration(4) + default_sample_size(4) + default_sample_flags(4)
+            if contentStart + 24 > boxEnd
+                return false
+            end if
+
+            cursor = contentStart + 4 ' skip version/flags
+            ' track_ID + default_sample_description_index
+            cursor += 8
+
+            duration = m.ReadU32BE(buf, cursor)
+            scaled = m.ScaleUnsigned(duration, factor)
+            m.WriteU32BE(buf, cursor, scaled)
+            return true
+        end function
+
+        function GetHeaderValue(headers as object, key as string) as dynamic
+            if headers = invalid or StringUtils.IsNullOrEmpty(key)
+                return invalid
+            end if
+
+            if headers.DoesExist(key)
+                return headers[key]
+            end if
+
+            lowerKey = LCase(key)
+            for each headerKey in headers
+                if LCase(headerKey) = lowerKey
+                    return headers[headerKey]
+                end if
+            end for
+
+            return invalid
+        end function
+
+        function RangeStartsAtZero(rangeHeader as dynamic) as boolean
+            if not IsString(rangeHeader) or StringUtils.IsNullOrEmpty(rangeHeader)
+                return true
+            end if
+
+            value = rangeHeader.Trim()
+            if value = ""
+                return true
+            end if
+
+            lower = LCase(value)
+            if not lower.StartsWith("bytes=")
+                return false
+            end if
+
+            bytesPart = lower.Mid(6)
+            dashIndex = bytesPart.InStr("-")
+            if dashIndex = -1
+                return false
+            end if
+
+            startStr = bytesPart.Left(dashIndex).Trim()
+            if startStr = ""
+                return false
+            end if
+
+            return Val(startStr) = 0
+        end function
+
+        function NormalizeSpeed(speedParam as dynamic) as double
+            speed = 1.0
+            if IsString(speedParam) and not StringUtils.IsNullOrEmpty(speedParam)
+                speed = Val(speedParam)
+            else if IsInt(speedParam) or IsFloat(speedParam) or IsDouble(speedParam)
+                speed = Cdbl(speedParam)
+            end if
+
+            if speed <= 0
+                speed = 1.0
+            end if
+
+            ' Keep in sync with the in-player selector (SpeedSelector)
+            if speed < 0.5
+                speed = 0.5
+            else if speed > 2.0
+                speed = 2.0
+            end if
+
+            return speed
+        end function
+
+        ' ---------------------------
+        ' fMP4 time scaling (CMAF)
+        ' ---------------------------
+        function ScaleFmp4FragmentTimes(buf as object, factor as double) as boolean
+            if buf = invalid or buf.Count() < 8
+                return false
+            end if
+            if factor <= 0 or factor = 1.0
+                return true
+            end if
+
+            patched = false
+            cursor = 0
+            total = buf.Count()
+
+            while cursor + 8 <= total
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > total
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = total - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > total
+                    exit while
+                end if
+
+                if boxType = "moof"
+                    if m.ScaleMoof(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleMoof(buf as object, startPos as integer, endPos as integer, factor as double) as boolean
+            patched = false
+            cursor = startPos
+
+            while cursor + 8 <= endPos
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > endPos
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = endPos - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > endPos
+                    exit while
+                end if
+
+                if boxType = "traf"
+                    if m.ScaleTraf(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleTraf(buf as object, startPos as integer, endPos as integer, factor as double) as boolean
+            patched = false
+            cursor = startPos
+
+            while cursor + 8 <= endPos
+                boxSize = m.ReadU32BE(buf, cursor)
+                boxType = m.ReadType(buf, cursor + 4)
+                headerSize = 8
+
+                if boxSize = 1
+                    if cursor + 16 > endPos
+                        exit while
+                    end if
+                    boxSize = m.ReadU64BE(buf, cursor + 8)
+                    headerSize = 16
+                else if boxSize = 0
+                    boxSize = endPos - cursor
+                end if
+
+                boxSizeInt = CInt(boxSize)
+                if boxSizeInt < headerSize or cursor + boxSizeInt > endPos
+                    exit while
+                end if
+
+                if boxType = "tfdt"
+                    if m.ScaleTfdt(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                else if boxType = "tfhd"
+                    if m.ScaleTfhd(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                else if boxType = "trun"
+                    if m.ScaleTrun(buf, cursor + headerSize, cursor + boxSizeInt, factor)
+                        patched = true
+                    end if
+                end if
+
+                cursor += boxSizeInt
+            end while
+
+            return patched
+        end function
+
+        function ScaleTfdt(buf as object, contentStart as integer, boxEnd as integer, factor as double) as boolean
+            if contentStart + 8 > boxEnd
+                return false
+            end if
+
+            version = buf[contentStart]
+            ' flags = next 3 bytes (unused)
+            cursor = contentStart + 4
+
+            if version = 1
+                if cursor + 8 > boxEnd
+                    return false
+                end if
+                value = m.ReadU64BE(buf, cursor)
+                scaled = m.ScaleUnsigned(value, factor)
+                m.WriteU64BE(buf, cursor, scaled)
+                return true
+            end if
+
+            if cursor + 4 > boxEnd
+                return false
+            end if
+            value32 = m.ReadU32BE(buf, cursor)
+            scaled32 = m.ScaleUnsigned(value32, factor)
+            m.WriteU32BE(buf, cursor, scaled32)
+            return true
+        end function
+
+        function ScaleTfhd(buf as object, contentStart as integer, boxEnd as integer, factor as double) as boolean
+            if contentStart + 12 > boxEnd
+                return false
+            end if
+
+            flags = m.ReadU24BE(buf, contentStart + 1)
+            cursor = contentStart + 4
+
+            ' track_ID
+            cursor += 4
+
+            ' base_data_offset_present
+            if (flags and &h000001) <> 0
+                cursor += 8
+            end if
+            ' sample_description_index_present
+            if (flags and &h000002) <> 0
+                cursor += 4
+            end if
+            ' default_sample_duration_present
+            if (flags and &h000008) <> 0
+                if cursor + 4 > boxEnd
+                    return false
+                end if
+                duration = m.ReadU32BE(buf, cursor)
+                scaled = m.ScaleUnsigned(duration, factor)
+                m.WriteU32BE(buf, cursor, scaled)
+                cursor += 4
+                return true
+            end if
+
+            return false
+        end function
+
+        function ScaleTrun(buf as object, contentStart as integer, boxEnd as integer, factor as double) as boolean
+            if contentStart + 12 > boxEnd
+                return false
+            end if
+
+            version = buf[contentStart]
+            flags = m.ReadU24BE(buf, contentStart + 1)
+            cursor = contentStart + 4
+
+            sampleCount = m.ReadU32BE(buf, cursor)
+            cursor += 4
+
+            ' data-offset-present
+            if (flags and &h000001) <> 0
+                cursor += 4
+            end if
+            ' first-sample-flags-present
+            if (flags and &h000004) <> 0
+                cursor += 4
+            end if
+
+            hasDuration = (flags and &h000100) <> 0
+            hasSize = (flags and &h000200) <> 0
+            hasFlags = (flags and &h000400) <> 0
+            hasCto = (flags and &h000800) <> 0
+
+            patched = false
+            for i = 0 to CInt(sampleCount) - 1
+                if hasDuration
+                    if cursor + 4 > boxEnd
+                        exit for
+                    end if
+                    d = m.ReadU32BE(buf, cursor)
+                    scaled = m.ScaleUnsigned(d, factor)
+                    m.WriteU32BE(buf, cursor, scaled)
+                    cursor += 4
+                    patched = true
+                end if
+                if hasSize
+                    cursor += 4
+                end if
+                if hasFlags
+                    cursor += 4
+                end if
+                if hasCto
+                    if cursor + 4 > boxEnd
+                        exit for
+                    end if
+                    raw = m.ReadU32BE(buf, cursor)
+                    if version = 1
+                        signed = m.U32ToI32(raw)
+                        scaledSigned = m.ScaleSigned(signed, factor)
+                        m.WriteU32BE(buf, cursor, m.I32ToU32(scaledSigned))
+                    else
+                        scaledCto = m.ScaleUnsigned(raw, factor)
+                        m.WriteU32BE(buf, cursor, scaledCto)
+                    end if
+                    cursor += 4
+                    patched = true
+                end if
+            end for
+
+            return patched
+        end function
+
+        ' ---------------------------
+        ' Byte/MP4 helpers
+        ' ---------------------------
+        function ReadType(buf as object, offset as integer) as string
+            return Chr(buf[offset]) + Chr(buf[offset + 1]) + Chr(buf[offset + 2]) + Chr(buf[offset + 3])
+        end function
+
+        function ReadU24BE(buf as object, offset as integer) as integer
+            return (buf[offset] << 16) + (buf[offset + 1] << 8) + buf[offset + 2]
+        end function
+
+        function ReadU32BE(buf as object, offset as integer) as double
+            return Cdbl(buf[offset]) * 16777216 + Cdbl(buf[offset + 1]) * 65536 + Cdbl(buf[offset + 2]) * 256 + Cdbl(buf[offset + 3])
+        end function
+
+        function ReadU64BE(buf as object, offset as integer) as double
+            hi = m.ReadU32BE(buf, offset)
+            lo = m.ReadU32BE(buf, offset + 4)
+            return (hi * 4294967296) + lo
+        end function
+
+        function WriteU32BE(buf as object, offset as integer, value as dynamic) as void
+            v = value
+            if IsFloat(v) or IsDouble(v)
+                v = Fix(v)
+            end if
+            if v < 0
+                v = v + 4294967296
+            end if
+
+            b0 = Fix(v / 16777216)
+            v = v - (b0 * 16777216)
+            b1 = Fix(v / 65536)
+            v = v - (b1 * 65536)
+            b2 = Fix(v / 256)
+            b3 = v - (b2 * 256)
+
+            buf[offset] = b0
+            buf[offset + 1] = b1
+            buf[offset + 2] = b2
+            buf[offset + 3] = b3
+        end function
+
+        function WriteU64BE(buf as object, offset as integer, value as dynamic) as void
+            v = value
+            if IsFloat(v) or IsDouble(v)
+                v = Fix(v)
+            end if
+            if v < 0
+                v = 0
+            end if
+
+            hi = Fix(v / 4294967296)
+            lo = v - (hi * 4294967296)
+            m.WriteU32BE(buf, offset, hi)
+            m.WriteU32BE(buf, offset + 4, lo)
+        end function
+
+        function ScaleUnsigned(value as dynamic, factor as double) as double
+            v = Cdbl(value)
+            scaled = v * factor
+            if scaled < 0
+                scaled = 0
+            end if
+            return Fix(scaled + 0.5)
+        end function
+
+        function ScaleSigned(value as dynamic, factor as double) as integer
+            v = Cdbl(value)
+            scaled = v * factor
+            if scaled >= 0
+                return CInt(Fix(scaled + 0.5))
+            end if
+            return -CInt(Fix(Abs(scaled) + 0.5))
+        end function
+
+        function U32ToI32(raw as dynamic) as integer
+            r = Cdbl(raw)
+            if r >= 2147483648
+                return CInt(r - 4294967296)
+            end if
+            return CInt(r)
+        end function
+
+        function I32ToU32(value as dynamic) as double
+            v = Cdbl(value)
+            if v < 0
+                return v + 4294967296
+            end if
+            return v
+        end function
+
+    end class
+
+end namespace
+

@@ -116,6 +116,11 @@ function ExecuteJob() as void
         return
     end if
 
+    ' Clear any prior DRM params on reused nodes (non-DRM videos should not inherit drmParams)
+    if contentNode.DoesExist("drmParams")
+        contentNode.drmParams = invalid
+    end if
+
     isDrm = not StringUtils.IsNullOrEmpty(metadata.drmParams)
     if isDrm
         licenseServerURL = UrlUtils.BuildUrl(`http://127.0.0.1:${playletServerPort}/api/innertube/get_drm_license`, invalid, {
@@ -156,6 +161,12 @@ function ExecuteJob() as void
     end if
 end function
 
+' Temporary: force playback speed for debugging.
+' Set to invalid to disable forcing.
+function GetForcedPlaybackSpeed() as dynamic
+    return "1.5"
+end function
+
 function CreateStreamUrls(metadata as object, service as Invidious.InvidiousService, preferences as object, backend as string, playletServerPort as integer) as object
     instance = service.GetInstance()
     proxyVideos = preferences["invidious.proxy_videos"]
@@ -167,10 +178,10 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     ' Only AV1 and HEVC are supported via DASH for 4K content.
     ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
     codecSupport = DeviceSupports4kDash(false) ' Don't force - we need accurate detection
-    
+
     ' Check what 4K codecs are actually available in this video's streams
     available4kCodecs = GetAvailable4kCodecs(metadata)
-    
+
     ' For 4K via DASH, we need a MATCHING codec:
     ' - Device supports AV1 AND video has AV1 4K streams, OR
     ' - Device supports HEVC AND video has HEVC 4K streams
@@ -178,7 +189,7 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     canUseAv1Dash = codecSupport.av1Dash and available4kCodecs.hasAv1
     canUseHevcDash = codecSupport.hevcDash and available4kCodecs.hasHevc
     supportsAv1OrHevcDash = canUseAv1Dash or canUseHevcDash
-    
+
     LogAvailableVideoSources(metadata)
     LogDeviceVideoCapabilities(metadata)
     LogInfo(`4K DASH codec support: AV1=${codecSupport.av1Dash}, HEVC=${codecSupport.hevcDash}, VP9/DASH=${codecSupport.vp9Dash} (VP9 not usable in DASH on Roku)`)
@@ -187,6 +198,16 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
 
     streamUrls = []
     hasDrmDash = SupportsDrmDashManifestUrl(metadata)
+    forcedSpeed = GetForcedPlaybackSpeed()
+    if forcedSpeed <> invalid
+        playbackSpeed = NormalizePlaybackSpeed(forcedSpeed)
+    else
+        playbackSpeed = NormalizePlaybackSpeed(preferences["playback.speed"])
+    end if
+    if hasDrmDash
+        ' DRM playback is handled via /api/dash?url=...; keep speed fixed at 1.0x
+        playbackSpeed = "1.0"
+    end if
     prefers4k = Prefers4kQuality(preferredQuality)
     muxerUrls = []
     if prefers4k
@@ -198,7 +219,7 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
         muxerUrls = BuildMuxerUrls(preferences, metadata, preferredQuality, muxerVcodec)
     end if
     muxerUrl = muxerUrls.Count() > 0 ? muxerUrls[0] : invalid
-    
+
     LogInfo(`Stream URL selection: preferredQuality=${preferredQuality}, prefers4k=${prefers4k}, supportsAv1OrHevcDash=${supportsAv1OrHevcDash}, muxerUrl=${muxerUrl}, hasDrmDash=${hasDrmDash}`)
 
     ' Strategy for 4K content:
@@ -207,7 +228,7 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     ' 3. Fall back to non-4K DASH/HLS
     ' Note: VP9 is only supported in HLS on Roku, not in DASH or direct WebM streaming
     ' See: https://developer.roku.com/en-ca/docs/specs/media/streaming-specifications.md
-    
+
     if prefers4k
         if supportsAv1OrHevcDash
             ' Device supports 4K via DASH natively (AV1 or HEVC)
@@ -237,7 +258,7 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
         metadata.hlsUrl = AddInstanceToUrlIfNeeded(metadata.hlsUrl, instance)
         AddHlsUrls(streamUrls, metadata, dashPreferredQuality, backend, proxyVideos, playletServerPort)
     else if SupportsDash(metadata)
-        AddDashUrls(streamUrls, metadata, dashPreferredQuality, backend, proxyVideos, playletServerPort)
+        AddDashUrls(streamUrls, metadata, dashPreferredQuality, backend, proxyVideos, playletServerPort, playbackSpeed)
     else if SupportsMuxedFormats(metadata)
         for each stream in metadata.formatStreams
             if StringUtils.IsNullOrEmpty(stream.url)
@@ -249,7 +270,7 @@ function CreateStreamUrls(metadata as object, service as Invidious.InvidiousServ
     end if
 
     LogInfo(`Final stream URLs (${streamUrls.Count()}): ${FormatJson(streamUrls)}`)
-    
+
     ' Add muxer as fallback if it wasn't already added as primary
     if muxerUrls.Count() > 0 and not hasDrmDash and streamUrls.Count() > 0
         for each url in muxerUrls
@@ -294,28 +315,28 @@ function GetAvailable4kCodecs(metadata as object) as object
         hasHevc: false
         hasVp9: false
     }
-    
+
     adaptiveFormats = ValidArray(metadata.adaptiveFormats)
-    
+
     for each fmt in adaptiveFormats
         mimeType = ValidString(fmt["type"])
         if StringUtils.IsNullOrEmpty(mimeType) or not mimeType.StartsWith("video/")
             continue for
         end if
-        
+
         ' Check if this is a 4K stream (2160p)
         qualityLabel = LCase(ValidString(fmt["qualityLabel"]))
         resolution = ValidString(fmt["resolution"])
         is4k = qualityLabel.InStr("2160") <> -1 or resolution.InStr("2160") <> -1 or resolution.InStr("3840") <> -1
-        
+
         if not is4k
             continue for
         end if
-        
+
         ' Parse the codec from mime type
         parsed = ParseMimeType(mimeType)
         codec = LCase(parsed.codec)
-        
+
         ' Check codec type
         if codec.InStr("av01") <> -1 or codec.InStr("av1") <> -1
             result.hasAv1 = true
@@ -325,7 +346,7 @@ function GetAvailable4kCodecs(metadata as object) as object
             result.hasVp9 = true
         end if
     end for
-    
+
     return result
 end function
 
@@ -588,7 +609,7 @@ function BuildMuxerUrl(preferences as object, metadata as object, preferredQuali
     if container = "hls" and not StringUtils.IsNullOrEmpty(vcodec)
         params.vcodec = vcodec
     end if
-    
+
     LogInfo(`BuildMuxerUrl: using endpoint=${muxerUrl}, useHls=${useHls}, container=${container}`)
     return UrlUtils.AppendQueryParams(muxerUrl, params)
 end function
@@ -703,10 +724,10 @@ end function
 
 function CheckCanDecodeVideo(deviceInfo as object, codec as string, container as string) as boolean
     decodeInfo = deviceInfo.CanDecodeVideo({ "codec": codec, "container": container })
-    
+
     ' Log the raw result for debugging
     LogDebug(`CanDecodeVideo(codec=${codec}, container=${container}) returned:`, ToString(decodeInfo))
-    
+
     if IsBool(decodeInfo)
         return decodeInfo
     end if
@@ -727,22 +748,22 @@ function LogExtendedCodecDiagnostics() as void
     end if
 
     LogInfo("=== Extended Codec Diagnostics ===")
-    
+
     ' Device info
     LogInfo(`Device Model: ${deviceInfo.GetModel()}`)
     LogInfo(`Model Display Name: ${deviceInfo.GetModelDisplayName()}`)
-    
+
     ' Test various codec/container combinations
     codecs = ["vp9", "vp09", "av1", "av01", "hevc", "hvc1", "hev1", "h264", "avc1"]
     containers = ["dash", "webm", "mp4", "mkv", "hls"]
-    
+
     for each codec in codecs
         for each container in containers
             result = deviceInfo.CanDecodeVideo({ "codec": codec, "container": container })
             LogInfo(`CanDecodeVideo(${codec}/${container}): ${ToString(result)}`)
         end for
     end for
-    
+
     ' Also try with profile/level for VP9
     vp9Profiles = [
         { "codec": "vp9", "container": "webm" }
@@ -752,13 +773,13 @@ function LogExtendedCodecDiagnostics() as void
         { "codec": "vp9", "container": "dash", "profile": "2" }
         { "codec": "vp9", "container": "mp4" }
     ]
-    
+
     LogInfo("=== VP9 Profile Tests ===")
     for each opts in vp9Profiles
         result = deviceInfo.CanDecodeVideo(opts)
         LogInfo(`CanDecodeVideo(${FormatJson(opts)}): ${ToString(result)}`)
     end for
-    
+
     LogInfo("=== End Codec Diagnostics ===")
 end function
 
@@ -844,12 +865,16 @@ function AddHlsUrls(streamUrls as object, metadata as object, preferredQuality a
     AddUrls(streamUrls, hlsUrl, hlsUrlLocal, hlsUrlFiltered, hlsUrlFilteredLocal, proxyVideos)
 end function
 
-function AddDashUrls(streamUrls as object, metadata as object, preferredQuality as string, backend as string, proxyVideos as string, playletServerPort as integer) as void
+function AddDashUrls(streamUrls as object, metadata as object, preferredQuality as string, backend as string, proxyVideos as string, playletServerPort as integer, playbackSpeed as string) as void
     ' Redirect to Playet's local web server, where will will be
     ' dynamically generating the DASH manifest, and filter quality
     dashUrl = UrlUtils.AppendQueryParams(`http://127.0.0.1:${playletServerPort}/api/dash`, {
         v: metadata.videoId
     })
+
+    if playbackSpeed <> invalid and playbackSpeed <> "1.0"
+        dashUrl = UrlUtils.AppendQueryParams(dashUrl, { speed: playbackSpeed })
+    end if
 
     dashUrlLocal = invalid
     dashUrlFiltered = invalid
@@ -910,6 +935,36 @@ function AddUrls(streamUrls as object, url as string, urlLocal as dynamic, urlFi
             streamUrls.push(urlLocal)
         end if
     end if
+end function
+
+function NormalizePlaybackSpeed(value as dynamic) as string
+    speedStr = ValidString(value)
+    if StringUtils.IsNullOrEmpty(speedStr)
+        return "1.0"
+    end if
+
+    ' Allow values like "1.25x"
+    if speedStr.EndsWith("x")
+        speedStr = speedStr.Left(speedStr.Len() - 1)
+    end if
+
+    ' Normalize numeric formatting (e.g. "2.00" -> 2.0) and then whitelist
+    speed = Val(speedStr)
+    if speed <= 0
+        return "1.0"
+    end if
+
+    ' Keep this list in sync with the in-player selector (SpeedSelector)
+    supported = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    supportedStr = ["0.5", "0.75", "1.0", "1.25", "1.5", "2.0"]
+
+    for i = 0 to supported.Count() - 1
+        if Abs(speed - supported[i]) < 0.001
+            return supportedStr[i]
+        end if
+    end for
+
+    return "1.0"
 end function
 
 function AddInstanceToUrlIfNeeded(url as dynamic, instance as string) as dynamic

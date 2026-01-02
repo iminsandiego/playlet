@@ -31,6 +31,7 @@ namespace Http
             v = request.query.v
             local = request.query.local
             quality = request.query.quality
+            speedParam = request.query.speed
 
             if StringUtils.IsNullOrEmpty(v)
                 response.Default(400, "Missing video id")
@@ -51,6 +52,22 @@ namespace Http
             end if
 
             m.dashManifest.invidiousInstance = m.invidiousService.GetInstance()
+
+            playbackSpeed = 1.0
+            if IsString(speedParam) and not StringUtils.IsNullOrEmpty(speedParam)
+                playbackSpeed = Val(speedParam)
+            end if
+            if playbackSpeed <= 0
+                playbackSpeed = 1.0
+            end if
+            ' Keep in sync with the in-player selector (SpeedSelector)
+            if playbackSpeed < 0.5
+                playbackSpeed = 0.5
+            else if playbackSpeed > 2.0
+                playbackSpeed = 2.0
+            end if
+            m.dashManifest.playbackSpeed = playbackSpeed
+
             codecSupport = m.GetCodecSupport()
             m.dashManifest.allowAv1 = codecSupport.av1Dash
             ' Important: VP9 does NOT work in DASH on Roku, even if device reports support!
@@ -60,6 +77,7 @@ namespace Http
             m.dashManifest.allowHevc = codecSupport.hevcDash
 
             qualityFilter = m.CreateQualityFilter(quality)
+            LogInfo(`Generating DASH manifest: videoId=${v}, speed=${playbackSpeed}, local=${ValidString(local)}, quality=${ValidString(quality)}`)
             xmlContent = m.dashManifest.FromVideoMetadata(metadata, qualityFilter, ValidString(local) = "true")
 
             if xmlContent.InStr("[ERROR]") <> -1

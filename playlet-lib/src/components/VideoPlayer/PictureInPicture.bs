@@ -40,12 +40,36 @@ function InitializePictureInPictureAnimation()
     m.widthInterpolator = m.minimizeAnimation.findNode("widthInterpolator")
     m.heightInterpolator = m.minimizeAnimation.findNode("heightInterpolator")
     m.translationInterpolator = m.minimizeAnimation.findNode("translationInterpolator")
+    m.pipAnimTarget = m.top.findNode("PipAnimTarget")
     DisposableObserveFieldScoped(m.minimizeAnimation, "state", FuncName(OnMinimizeAnimationStateChange))
 
     m.widthInterpolator.keyValue = [m.maxRect.width, (m.maxRect.width + m.minRect.width) / 2, m.minRect.width]
     m.heightInterpolator.keyValue = [m.maxRect.height, (m.maxRect.height + m.minRect.height) / 2, m.minRect.height]
     midTranslation = [(m.maxRect.translation[0] + m.minRect.translation[0]) / 2, (m.maxRect.translation[1] + m.minRect.translation[1]) / 2]
     m.translationInterpolator.keyValue = [m.maxRect.translation, midTranslation, m.minRect.translation]
+
+    ' Copy animated values from the animation target node onto the Video node itself
+    if m.pipAnimTarget <> invalid
+        DisposableObserveFieldScoped(m.pipAnimTarget, "width", FuncName(OnPipAnimTargetChanged))
+        DisposableObserveFieldScoped(m.pipAnimTarget, "height", FuncName(OnPipAnimTargetChanged))
+        DisposableObserveFieldScoped(m.pipAnimTarget, "translation", FuncName(OnPipAnimTargetChanged))
+
+        ' Initialize target with current size/pos so first animation step is consistent
+        m.pipAnimTarget.width = m.top.width
+        m.pipAnimTarget.height = m.top.height
+        m.pipAnimTarget.translation = m.top.translation
+    end if
+end function
+
+function OnPipAnimTargetChanged() as void
+    target = m.pipAnimTarget
+    if target = invalid
+        return
+    end if
+
+    m.top.width = target.width
+    m.top.height = target.height
+    m.top.translation = target.translation
 end function
 
 function InitializePictureInPictureFullScreenHint()
