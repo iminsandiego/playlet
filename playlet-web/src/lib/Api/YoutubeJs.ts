@@ -141,20 +141,8 @@ export class YoutubeJs {
 
     static initJsEvaluator() {
         Platform.shim.eval = async (data: Types.BuildScriptResult, env: Record<string, Types.VMPrimative>) => {
-            const properties = [];
-
-            if (env.n) {
-                properties.push(`n: exportedVars.nFunction("${env.n}")`)
-            }
-
-            if (env.sig) {
-                properties.push(`sig: exportedVars.sigFunction("${env.sig}")`)
-            }
-
-            const code = `${data.output}\nreturn { ${properties.join(', ')} }`;
-
-            return new Function(code)();
-        }
+            return new Function(data.output)();
+        };
     }
 
     static async generateVisitorData() {
@@ -255,6 +243,10 @@ export class YoutubeJs {
             po_token: await YoutubeJs.generatePoToken(videoId),
         });
 
+        if (info.playability_status.status !== 'OK') {
+            throw new Error(`Video is not playable: ${info.playability_status.status}\nReason: ${info.playability_status.reason}`);
+        }
+
         // We can't generate a proper dash from live videos.
         // By returning null, we're telling Playlet to fetch video info itself.
         if (info.basic_info.is_live) {
@@ -320,12 +312,16 @@ export class YoutubeJs {
             init: format.init_range ? `${format.init_range.start}-${format.init_range.end}` : "",
             index: format.index_range ? `${format.index_range.start}-${format.index_range.end}` : "",
             bitrate: `${format.bitrate}`,
-            url: await format.decipher(YoutubeJs.innerTube.session.player),
             itag: `${format.itag}`,
             type: format.mime_type,
             clen: `${format.approx_duration_ms}`,
             lmt: `${format.last_modified}`,
         };
+
+        if (format.url || format.signature_cipher || format.cipher) {
+            result.url = await format.decipher(YoutubeJs.innerTube.session.player);
+        }
+
         if (format.audio_quality) {
             result.audioQuality = format.audio_quality;
         }

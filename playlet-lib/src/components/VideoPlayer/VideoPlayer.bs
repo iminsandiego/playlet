@@ -273,7 +273,12 @@ function PlayWithContent(contentNode as object)
     end if
 
     StartVideoContentJob(videoContentNode)
-    Lounge.SendNowPlayingLoading(contentNode.videoId)
+
+    playbackSpeed = ValidFloat(m.top.playbackSpeed)
+    if playbackSpeed <= 0
+        playbackSpeed = 1.0
+    end if
+    Lounge.SendNowPlayingLoading(contentNode.videoId, playbackSpeed)
 end function
 
 function StartVideoContentJob(videoContentNode as object)
@@ -337,7 +342,7 @@ function OnVideoContentJobDone(event as object) as void
     SeekToInitialPosition(content)
 
     PlayAfterPreviousPlayerHasStopped()
-    MarkVideoWatched(content.videoId, metadata.playbackTrackingUrls)
+    MarkVideoWatched(content.videoId, metadata.playbackTrackingUrls, metadata.cpn)
 end function
 
 function UpdateUiFromMetadata(content as object) as void
@@ -469,6 +474,9 @@ function OnVideoContentJobErrorDialogResponse(event as object)
     shouldPlayNext = false
     if event <> invalid
         dialog = event.getRoSGNode()
+        if m.errorDialog <> invalid and dialog.isSameNode(m.errorDialog)
+            m.errorDialog = invalid
+        end if
         dialog.unobserveFieldScoped("wasClosed")
         shouldPlayNext = dialog.actualButtonSelected = 0
     end if
@@ -482,7 +490,7 @@ function OnVideoContentJobErrorDialogResponse(event as object)
     Lounge.SendOnStateChange()
 end function
 
-function MarkVideoWatched(videoId as dynamic, playbackTrackingUrls as dynamic) as void
+function MarkVideoWatched(videoId as dynamic, playbackTrackingUrls as dynamic, cpn as dynamic) as void
     if StringUtils.IsNullOrEmpty(videoId)
         return
     end if
@@ -505,6 +513,7 @@ function MarkVideoWatched(videoId as dynamic, playbackTrackingUrls as dynamic) a
         authToken: authToken
         profileType: profileType
         playbackTrackingUrls: playbackTrackingUrls
+        cpn: cpn
     }
 
     m.markVideoWatchedJob = JobSystem.CreateCallback()
@@ -580,6 +589,14 @@ function OnVideoPlayerStateChange() as void
 
     if state = "playing"
         m.isSeekingPosition = false
+
+        ' If we somehow was able to recover playback after an error dialog, close the dialog
+        errorDialog = m.errorDialog
+        if errorDialog <> invalid
+            m.errorDialog = invalid
+            errorDialog.unobserveFieldScoped("wasClosed")
+            errorDialog.close = true
+        end if
     end if
 
     if state = "playing" and not m.videoPlayingSuccess
@@ -682,6 +699,7 @@ function OnVideoPlayerStateChange() as void
 
         dialog = DialogUtils.ShowTimedDialogButtons(errorData.body, errorData.title, buttons, 0, 10, true)
         if dialog <> invalid
+            m.errorDialog = dialog
             dialog.observeFieldScoped("wasClosed", FuncName(OnVideoContentJobErrorDialogResponse))
         else
             OnVideoContentJobErrorDialogResponse(invalid)

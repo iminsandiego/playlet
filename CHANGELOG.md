@@ -5,9 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.45.0] - 2026-05-25
 
-- Nothing worth mentioning yet.
+### Added
+
+- Experimental support for changing playback speed from YouTube mobile app using Leanback/Lounge api
+- Support for disabling AI auto-dubbed audio tracks
+
+### Fixed
+
+- Bug where large playlists (1k+ videos) only load the first page
+
+## [0.44.10] - 2026-05-03
+
+### Fixed
+
+- Bug where home screen editor is empty with a fresh install
+
+## [0.44.9] - 2026-04-25
+
+### Fixed
+
+- Updated dependencies and innertube versions
+
+## [0.44.8] - 2026-04-24
+
+### Fixed
+
+- Always use `signatureTimestamp` in `/player` calls to prevent "reload page" errors. This affects watch history.
+- Attempt 2 to fix watch history and watch progress
+
+## [0.44.7] - 2026-04-23
+
+### Fixed
+
+- Attempt to fix watch history and watch progress
+- Channel sort
+
+## [0.44.6] - 2026-02-08
+
+### Fixed
+
+- Error dialog doesn't close automatically when playback recovers after an error
+- All audio track names are shown as "Other" in multi audio track videos
+
+## [0.44.5] - 2026-01-17
+
+### Fixed
+
+- Error handling when ytjs formats have missing urls
 
 ## [0.44.4] - 2025-11-23
 

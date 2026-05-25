@@ -362,6 +362,7 @@ namespace InnertubeService
         cancellation = OptionUtils.Get(options, "cancellation")
         accessToken = OptionUtils.Get(options, "accessToken")
         onBehalfOfUser = OptionUtils.Get(options, "onBehalfOfUser")
+        cpn = OptionUtils.Get(options, "cpn")
 
         videostatsPlaybackUrl = videostatsPlaybackUrl.replace("https://s.", "https://www.")
         queryParams = UrlUtils.ParseQueryComponents(videostatsPlaybackUrl)
@@ -369,8 +370,8 @@ namespace InnertubeService
         queryParams["cbrver"] = INNERTUBE_TV_CLIENT_VERSION
         queryParams["cver"] = INNERTUBE_TV_CLIENT_VERSION
         queryParams["ver"] = "2"
-        queryParams["cpn"] = InnertubeService.CreateClientPlaybackNonce()
-        queryParams["cmt"] = 0
+        queryParams["cmt"] = "0"
+        queryParams["cpn"] = cpn
         queryParams["final"] = "1"
         videostatsPlaybackUrl = UrlUtils.SetQueryParams(videostatsPlaybackUrl, queryParams)
 
@@ -399,6 +400,7 @@ namespace InnertubeService
         onBehalfOfUser = OptionUtils.Get(options, "onBehalfOfUser")
 
         timeStr = time.ToStr("%.3f")
+        cpn = OptionUtils.Get(options, "cpn")
 
         videostatsWatchtimeUrl = videostatsWatchtimeUrl.replace("https://s.", "https://www.")
         queryParams = UrlUtils.ParseQueryComponents(videostatsWatchtimeUrl)
@@ -406,11 +408,11 @@ namespace InnertubeService
         queryParams["cbrver"] = INNERTUBE_TV_CLIENT_VERSION
         queryParams["cver"] = INNERTUBE_TV_CLIENT_VERSION
         queryParams["ver"] = "2"
-        queryParams["cpn"] = InnertubeService.CreateClientPlaybackNonce()
-        queryParams["cmt"] = 0
-        queryParams["final"] = "1"
+        queryParams["cpn"] = cpn
+        queryParams["cmt"] = "0"
         queryParams["st"] = timeStr
         queryParams["et"] = timeStr
+        queryParams["final"] = "1"
         videostatsWatchtimeUrl = UrlUtils.SetQueryParams(videostatsWatchtimeUrl, queryParams)
 
         request = HttpClient.Get(videostatsWatchtimeUrl)

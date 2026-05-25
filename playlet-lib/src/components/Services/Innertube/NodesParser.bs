@@ -86,6 +86,7 @@ namespace Innertube
             "richGridRenderer": ParseRichGridRenderer
             "richItemRenderer": ParseRichItemRenderer
             "feedFilterChipBarRenderer": ParseFeedFilterChipBarRenderer
+            "chipBarViewModel": ParseChipBarViewModel
             "continuationItemRenderer": ParseContinuationItemRenderer
             "appendContinuationItemsAction": ParseAppendContinuationItemsAction
             "reloadContinuationItemsCommand": ParseReloadContinuationItemsCommand
@@ -163,6 +164,7 @@ namespace Innertube
             "emergencyOneboxRenderer": ParseNotImplemented
             ' Suicide & crisis lifeline, within search
             "searchFrictionViewModel": ParseNotImplemented
+            "shoppingTimelyShelfViewModel": ParseNotImplemented
             "backstagePostRenderer": ParseNotImplemented
             "backstagePostThreadRenderer": ParseNotImplemented
             "counterfactualRenderer": ParseNotImplemented
@@ -1719,11 +1721,62 @@ namespace Innertube
     end function
 
     function ParseRichGridRenderer(nodeData as object, context as object) as object
-        feedFilterChipBarRenderer = ObjectUtils.Dig(nodeData, ["header", "feedFilterChipBarRenderer"])
+        header = nodeData["header"]
+        feedFilterChipBarRenderer = invalid
+        chipBarViewModel = invalid
+        if IsAssociativeArray(header)
+            feedFilterChipBarRenderer = header["feedFilterChipBarRenderer"]
+            chipBarViewModel = header["chipBarViewModel"]
+        end if
+
         if feedFilterChipBarRenderer <> invalid
             ParseFeedFilterChipBarRenderer(feedFilterChipBarRenderer, context)
+        else if chipBarViewModel <> invalid
+            ParseChipBarViewModel(chipBarViewModel, context)
         end if
         return nodeData["contents"]
+    end function
+
+    function ParseChipBarViewModel(nodeData as object, context as object) as object
+        chips = ObjectUtils.Dig(nodeData, ["chips"])
+        if not IsArray(chips)
+            return invalid
+        end if
+
+        sortOptions = []
+        for each chip in chips
+            chipViewModel = chip["chipViewModel"]
+            if not IsAssociativeArray(chipViewModel)
+                continue for
+            end if
+            title = ValidString(chipViewModel["text"])
+            isSelected = ValidBool(chipViewModel["selected"])
+            token = invalid
+            tapCommand = chipViewModel["tapCommand"]
+            if IsAssociativeArray(tapCommand)
+                innertubeCommand = tapCommand["innertubeCommand"]
+                if IsAssociativeArray(innertubeCommand)
+                    continuationCommand = innertubeCommand["continuationCommand"]
+                    if IsAssociativeArray(continuationCommand)
+                        token = ValidString(continuationCommand["token"])
+                    end if
+                end if
+            end if
+            if title = "" or StringUtils.IsNullOrEmpty(token)
+                continue for
+            end if
+            sortOptions.Push({
+                "title": title
+                "continuation": token
+                "isSelected": isSelected
+            })
+        end for
+
+        if sortOptions.Count() > 0
+            context.currentFeed.sortOptions = sortOptions
+        end if
+
+        return invalid
     end function
 
     function ParseRichItemRenderer(nodeData as object, _context as object) as object

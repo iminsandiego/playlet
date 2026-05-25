@@ -115,12 +115,17 @@ function OnLineSysLog(event as object, dateTime as object, logsFile as string, b
     if info.LogType <> "http.error"
         return
     end if
+    httpCode = ValidInt(info.HttpCode)
+    if httpCode >= 200 and httpCode < 300
+        return
+    end if
+
     line = FormatTime(dateTime) + "[ERROR][SysLog] " + ToString(info)
     print line
     buffer.FromAsciiString(line + `\n`)
     buffer.AppendFile(logsFile)
 
-    fingerprint = `SysLog${info.Status}${info.LogType}${info.HttpCode}${info.Method}`
+    fingerprint = `SysLog${info.Status}${info.LogType}${httpCode}${info.Method}`
 
     if ThrottleEvent("SysLogError", fingerprint, 60)
         return
@@ -145,11 +150,11 @@ function OnLineLogMonitorMemoryWarning(event as object, dateTime as object, logs
         return
     end if
 
-    LogTelemetryEvent({
-        level: "warning"
-        message: line + `\nCurrentTime: ${m.eventThrottleTimer.TotalSeconds()}`
-        fingerprint: [message]
-    })
+    ' LogTelemetryEvent({
+    '     level: "warning"
+    '     message: line + `\nCurrentTime: ${m.eventThrottleTimer.TotalSeconds()}`
+    '     fingerprint: [message]
+    ' })
 end function
 
 function OnLineLogDeviceInfoMemoryWarning(event as object, dateTime as object, logsFile as string, buffer as object) as void
@@ -168,11 +173,11 @@ function OnLineLogDeviceInfoMemoryWarning(event as object, dateTime as object, l
     buffer.FromAsciiString(line + `\n`)
     buffer.AppendFile(logsFile)
 
-    LogTelemetryEvent({
-        level: "warning"
-        message: line + `\nCurrentTime: ${m.eventThrottleTimer.TotalSeconds()}`
-        fingerprint: [message]
-    })
+    ' LogTelemetryEvent({
+    '     level: "warning"
+    '     message: line + `\nCurrentTime: ${m.eventThrottleTimer.TotalSeconds()}`
+    '     fingerprint: [message]
+    ' })
 end function
 
 ' Returns true if the event should be throttled
