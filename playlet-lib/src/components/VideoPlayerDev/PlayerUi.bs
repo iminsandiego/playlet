@@ -12,7 +12,18 @@ end enum
 
 function InitializePlayerUi()
     m.top.enableUI = false
-    m.top.enableTrickPlay = false
+    m.top.enableTrickPlay = true
+
+    ' Configure native trickplay intervals:
+    ' - D-pad Left/Right scrub by 10 seconds (default is 5)
+    ' - FF/RW cycles through 10/30/60 second skips (1/2/3 arrows)
+    if m.top.hasField("jumpIntervalSeconds")
+        m.top.jumpIntervalSeconds = 10
+    end if
+    if m.top.hasField("trickPlaySpeed")
+        ' Speed multipliers: at base interval, these give 10/30/60 second skips
+        m.top.trickPlaySpeed = [2, 6, 12]
+    end if
 
     FindUiNodes()
     SetupLoadingSpinner()
@@ -23,11 +34,13 @@ function InitializePlayerUi()
     DisposableObserveField(m.top, "playerUiState", FuncName(OnPlayerUiState))
     DisposableObserveField(m.top, "focusedChild", FuncName(OnPlayerFocusChange))
 
+    m.focusPlayButtonOnNextUiShow = true
     m.top.playerUiState = PlayerUiState.Visible
 end function
 
 function FindUiNodes()
     m.clock = m.top.findNode("Clock")
+    m.topUi = m.top.findNode("TopUi")
     m.titleLabel = m.top.findNode("TitleLabel")
     m.secondaryTitleLabel = m.top.findNode("SecondaryTitleLabel")
     m.viewCountLabel = m.top.findNode("ViewCountLabel")
@@ -93,26 +106,35 @@ function OnPlayerUiState()
     end if
 end function
 
-function OnPlayerUiFadingIn()
+function OnPlayerUiFadingIn() as void
+    ' Only show full UI overlay when fullscreen. In PiP/minimized mode, the
+    ' PictureInPicture module manages videoUi visibility and we should not
+    ' override it, as the full-size 1280x720 overlay would not fit the smaller window.
+    if m.container <> invalid and not m.container.fullscreen
+        return
+    end if
+
     ' Ensure UI group is visible before animating opacity
     m.videoUi.visible = true
 
-    if m.top.hasFocus()
-        NodeSetFocus(m.playButton, true)
-    end if
+    FocusPlayButtonOnUiShow()
 
     m.uiFadeOpacityInterpolator.reverse = false
     m.uiFadeAnimation.control = "start"
 end function
 
-function OnPlayerUiVisible()
+function OnPlayerUiVisible() as void
+    ' Only show full UI overlay when fullscreen. In PiP/minimized mode, the
+    ' PictureInPicture module manages videoUi visibility.
+    if m.container <> invalid and not m.container.fullscreen
+        return
+    end if
+
     ' Ensure UI is visible (critical when entering Visible state directly, not via FadingIn animation)
     m.videoUi.visible = true
     m.videoUi.opacity = 1
 
-    if m.top.hasFocus()
-        NodeSetFocus(m.playButton, true)
-    end if
+    FocusPlayButtonOnUiShow()
 
     StartHideVideoUiTimer()
 end function
@@ -124,6 +146,9 @@ end function
 
 function OnPlayerUiHidden()
     m.videoUi.opacity = 0
+    ' Hide the UI group entirely so invisible buttons don't capture focus.
+    ' This prevents navigation keys from changing focus on hidden controls.
+    m.videoUi.visible = false
 
     if m.top.isInFocusChain() and not m.top.hasFocus()
         NodeSetFocus(m.top, false)
@@ -140,10 +165,51 @@ function OnPlayerFocusChange() as void
 
     state = m.top.playerUiState
     if state = PlayerUiState.Visible or state = PlayerUiState.FadingIn
-        if m.playButton <> invalid
-            NodeSetFocus(m.playButton, true)
-        end if
+        FocusPlayButtonOnUiShow()
     end if
+end function
+
+function FocusPlayButtonOnUiShow() as void
+    if m.focusPlayButtonOnNextUiShow <> true
+        return
+    end if
+
+    if not m.top.hasFocus()
+        return
+    end if
+
+    focusTarget = GetDefaultUiFocusTarget()
+    if focusTarget = invalid
+        return
+    end if
+
+    NodeSetFocus(focusTarget, true)
+    m.focusPlayButtonOnNextUiShow = false
+end function
+
+function GetDefaultUiFocusTarget() as object
+    if m.playButton <> invalid and m.playButton.visible and m.playButton.focusable
+        return m.playButton
+    end if
+
+    focusCandidates = [
+        m.skipBackButton
+        m.skipForwardButton
+        m.qualityButton
+        m.ccButton
+        m.statsButton
+        m.bookmarkButton
+        m.minimizeButton
+        m.previousButton
+        m.nextButton
+    ]
+    for each candidate in focusCandidates
+        if candidate <> invalid and candidate.visible and candidate.focusable
+            return candidate
+        end if
+    end for
+
+    return invalid
 end function
 
 function StartHideVideoUiTimer()
@@ -157,6 +223,13 @@ end function
 
 function OnHideVideoUiTimer() as void
     if m.top.playerUiState = PlayerUiState.Hidden
+        return
+    end if
+
+    ' Don't hide custom UI while user is actively seeking.
+    ' Restart timer and check again later.
+    if m.isSeekingPosition = true
+        StartHideVideoUiTimer()
         return
     end if
 

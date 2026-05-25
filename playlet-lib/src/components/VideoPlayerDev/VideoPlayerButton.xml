@@ -1,4 +1,5 @@
-<component name="VideoPlayerButton" extends="Group">
+<component name="VideoPlayerButtonDev" extends="Group">
+    <script type="text/brightscript" uri="pkg:/components/VideoPlayerDev/VideoPlayerButtonDev.bs" />
     <interface>
         <field id="backgroundColor" type="color" value="#3C3C3C" />
         <!-- Focus should "brighten" (not invert) -->
@@ -11,6 +12,7 @@
 
         <field id="iconColor" type="color" value="#DDDDDD" />
         <field id="focusedIconColor" type="color" value="#FFFFFF" />
+        <field id="focusedActiveIconColor" type="color" value="#FF4A5A" />
         <field id="disabledIconColor" type="color" value="#606060" />
         <field id="activeIconColor" type="color" value="#FF1C30" />
 
@@ -22,7 +24,7 @@
     <children>
         <Poster
             id="background"
-            uri="pkg:/images/white-circle.png"
+            uri="pkg:/images/white-circle-aa-42.png"
             width="42"
             height="42">
             <Poster

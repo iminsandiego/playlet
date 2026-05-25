@@ -1,3 +1,4 @@
+import "pkg:/components/VideoPlayerDev/SponsorBlock.bs"
 import "pkg:/source/utils/DisposableObserve.bs"
 import "pkg:/source/utils/Types.bs"
 
@@ -117,7 +118,7 @@ function OnFullScreenChange()
         Minimize()
     end if
 
-    UpdateStatsOverlayVisibility()
+    SponsorBlock.SetVisible(m.notifications, m.container.fullscreen)
 end function
 
 function Minimize() as void
