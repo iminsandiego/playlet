@@ -4,20 +4,27 @@
 //
 //   cd references/playlet-legacy && npx tsx ./integration-tests/vpd-player-buttonrow.ts
 
-import { Key, Button, Mode, press, launchVod, finish, group, expectField, expectPred, expectMediaState, waitFor } from './vpd-player-harness';
+import { Key, Button, Mode, press, revealChrome, launchVod, finish, group, expectField, expectPred, expectMediaState, waitFor } from './vpd-player-harness';
 
-const CONTENT_ID = 'jNQXAC9IVRw'; // "Me at the zoo"
+const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full control-row exercise
 
 (async () => {
     await launchVod(CONTENT_ID);
 
-    group('OK reveals chrome -> trackbar focused by default (two-tier focus)');
-    await press(Key.Ok);
+    group('Up reveals chrome -> trackbar focused by default (two-tier focus)');
+    // Startup may briefly show the HUD while the first frame settles. Exercise the hidden -> reveal edge,
+    // not a timing-dependent shown -> pause edge.
+    await expectField('#Chrome.opacity', 0, 7000);
+    await revealChrome();
     await expectField('#buttonRow.visible', true);
     await expectField('#buttonRow.transportMode', Mode.idle);
     await expectField('#buttonRow.rowFocused', false);
     await expectField('#PlayPauseButton.focused', false);
     await expectField('#trickPlayBar.focused', true);
+    await expectField('#PreviousButton.disabled', true);
+    await expectField('#SkipBackButton.disabled', false);
+    await expectField('#SkipForwardButton.disabled', false);
+    await expectField('#NextButton.disabled', true);
 
     group('Right seeks immediately from the default trackbar focus (no navigation needed)');
     await press(Key.Right);
@@ -35,12 +42,48 @@ const CONTENT_ID = 'jNQXAC9IVRw'; // "Me at the zoo"
     await expectField('#PlayPauseButton.focused', true);
     await expectField('#trickPlayBar.focused', false);
     await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.skipForward);
+    await expectField('#SkipForwardButton.focused', true);
+    await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.quality);
+    await expectField('#QualityButton.focused', true);
+    await expectField('#SkipForwardButton.focused', false);
+    await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.captions);
+    await expectField('#CaptionsButton.focused', true);
+    await expectField('#QualityButton.focused', false);
+    await expectField('#PlayPauseButton.focused', false);
+    await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.stats);
+    await expectField('#StatsButton.focused', true);
+    await expectField('#CaptionsButton.focused', false);
+    await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.bookmark);
+    await expectField('#BookmarkButton.focused', true);
+    await expectField('#StatsButton.focused', false);
+    await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.minimize);
     await expectField('#MinimizeButton.focused', true);
-    await expectField('#PlayPauseButton.focused', false);
+    await expectField('#BookmarkButton.focused', false);
     await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.minimize); // clamp, no wrap
     await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.bookmark);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.stats);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.captions);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.quality);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.skipForward);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.playPause);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.skipBack);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.skipBack); // Previous is disabled, so this clamps
+    await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
 
     group('Down -> back to the trackbar (cursor grows); Up -> back to play/pause');
@@ -77,7 +120,12 @@ const CONTENT_ID = 'jNQXAC9IVRw'; // "Me at the zoo"
     await waitFor('#trickPlayBar.focused', (v) => v === true, 'trackbar focused on reveal');
     await press(Key.Up); // -> buttons tier, play/pause (doubled defensively, as above)
     await press(Key.Up);
-    await press(Key.Right);
+    await press(Key.Right); // -> skip forward
+    await press(Key.Right); // -> Quality (skips disabled Next)
+    await press(Key.Right); // -> Captions
+    await press(Key.Right); // -> Stats
+    await press(Key.Right); // -> Bookmark
+    await press(Key.Right); // -> Minimize
     await expectField('#buttonRow.focusedIndex', Button.minimize);
     await press(Key.Ok); // activate -> PiP shrink (width 1280 -> 426, ~0.3s)
     await expectPred('#VideoPlayer.width', (w) => w > 0 && w < 1000, 'player shrank to the PiP window');

@@ -14,7 +14,18 @@ export { Key, ecp, odc };
 // Mirror the BrightScript enums the renderers project.
 export const Mode = { idle: 0, scrub: 1, scan: 2, liveDvr: 3 } as const;
 export const Glyph = { none: 0, replay: 9 } as const;
-export const Button = { playPause: 0, minimize: 1 } as const;
+export const Button = {
+    previous: 0,
+    skipBack: 1,
+    playPause: 2,
+    skipForward: 3,
+    next: 4,
+    quality: 5,
+    captions: 6,
+    stats: 7,
+    bookmark: 8,
+    minimize: 9,
+} as const;
 
 const j = (v: unknown) => JSON.stringify(v);
 const eq = (a: unknown, b: unknown) => j(a) === j(b);
@@ -99,6 +110,41 @@ export function check(label: string, ok: boolean, detail?: unknown): void {
 
 export async function press(key: Key): Promise<void> {
     await ecp.sendKeypress(key);
+}
+
+// A background home-feed request can fail after a deep-linked player has already opened. Its scene-level
+// dialog then sits above the focused player and consumes every ECP key. Dismiss only that known, unrelated
+// dialog; an unexpected dialog may be a real player failure and must remain visible to the test.
+async function dismissBlockingFeedDialog(): Promise<void> {
+    let title: string | undefined;
+    try { title = await field<string>('dialog.title'); } catch { title = undefined; }
+    if (title !== 'Failed to load feed') return;
+
+    console.log('  dismissing background feed-error dialog before player input');
+    await press(Key.Ok);
+    const start = Date.now();
+    while (Date.now() - start < 4000) {
+        try { title = await field<string>('dialog.title'); } catch { title = undefined; }
+        if (title === undefined) return;
+        await ecp.sleep(120);
+    }
+}
+
+// Re-send the harmless hidden-HUD Up reveal until Chrome actually paints; once it does, stop immediately so
+// focus stays on the bar. The explicit paint acknowledgement also covers a late background feed-error dialog:
+// dismissBlockingFeedDialog removes it on the next pass instead of letting it consume the whole player spec.
+export async function revealChrome(timeoutMs = 30_000): Promise<boolean> {
+    const start = Date.now();
+    let opacity = await field<number>('#Chrome.opacity');
+    while ((opacity ?? 0) === 0 && Date.now() - start < timeoutMs) {
+        await dismissBlockingFeedDialog();
+        await press(Key.Up);
+        await ecp.sleep(250);
+        opacity = await field<number>('#Chrome.opacity');
+    }
+    const accepted = typeof opacity === 'number' && opacity > 0;
+    record(accepted, `Chrome accepted reveal input (opacity=${opacity})`);
+    return accepted;
 }
 
 // A fixed wait for a visual transition with no field oracle — named so it's auditable. Prefer waitFor().
@@ -186,20 +232,105 @@ export async function assertSponsorBlockFixture(): Promise<void> {
 export async function launch(contentId: string, timeoutMs = 30_000): Promise<boolean> {
     setupEnvironment(AppId.DEV);
     console.log(`launch: contentId=${contentId}`);
-    await ecp.sendLaunchChannel({ params: { contentId } });
+    // Every spec runs in its own process. The prior spec's final Home press is asynchronous, so force a clean
+    // channel boundary here before deep-linking; otherwise a just-minimized or fading player can leak into the
+    // next spec for a few frames and make its first key act on the previous UI state.
+    const homeStart = Date.now();
+    let homeExited = false;
+    while (Date.now() - homeStart < 10_000) {
+        await ecp.sendKeypress(Key.Home);
+        await ecp.sleep(250);
+        let activeId = AppId.DEV;
+        try { activeId = (await ecp.getActiveApp()).app?.id as AppId; } catch { /* retry */ }
+        if (activeId !== AppId.DEV) {
+            homeExited = true;
+            break;
+        }
+    }
+    if (!homeExited) {
+        console.log('  dev channel did not exit before relaunch');
+        return false;
+    }
+    await ecp.sendLaunchChannel({ params: { contentId }, verifyLaunch: true, verifyLaunchTimeOut: 10_000 });
     const start = Date.now();
+    let sawContentLoad = false;
     while (Date.now() - start < timeoutMs) {
         let state: string | undefined;
+        let loadedContentId: string | undefined;
+        let launchSpinnerMode: number | undefined;
         try {
             state = await field<string>('#VideoPlayer.state');
+            loadedContentId = await field<string>('#VideoPlayer.content.videoId');
+            launchSpinnerMode = await field<number>('#spinner.mode');
         } catch {
             state = undefined;
+            loadedContentId = undefined;
+            launchSpinnerMode = undefined;
         }
-        if (state === 'playing') {
+        if (state !== 'playing' || loadedContentId !== contentId || launchSpinnerMode === 1) {
+            sawContentLoad = true;
+        }
+        // The prior player can remain retained as previousPlayer while the deep link is loading. Do not accept
+        // its already-playing state as this launch's readiness; require the requested identity AND evidence of
+        // this launch's loading transition before accepting the playing edge.
+        if (sawContentLoad && state === 'playing' && loadedContentId === contentId) {
+            // The Video field can flip to playing before its scoped OnVideoState callback has projected the
+            // first-frame state into the coordinator/renderers. Wait for that callback's durable oracle: it
+            // turns the loading spinner off. Without this gate an immediate OK can be intentionally ignored by
+            // ShowChrome (firstFrameSeen is still false), making the test exercise startup rather than input.
+            const readyStart = Date.now();
+            let spinnerMode: number | undefined;
+            while (Date.now() - readyStart < 5000) {
+                try { spinnerMode = await field<number>('#spinner.mode'); } catch { spinnerMode = undefined; }
+                if (spinnerMode === 0) break;
+                await ecp.sleep(120);
+            }
+            if (spinnerMode !== 0) {
+                console.log(`  player reached playing but first-frame projection did not settle (spinner.mode=${spinnerMode})`);
+                return false;
+            }
             await assertPlayerIsDev();
+            // The device can report the player rendered several seconds before the scene routes ECP keys to
+            // it. Wait on the exact readiness condition instead of sleeping: upstream keeps real focus on the
+            // VideoPlayer root while its HUD uses virtual focus.
+            const focusStart = Date.now();
+            let playerFocused = false;
+            while (Date.now() - focusStart < 6000) {
+                try {
+                    playerFocused = await odc.hasFocus({ base: 'scene', keyPath: '#VideoPlayer' });
+                } catch {
+                    playerFocused = false;
+                }
+                if (playerFocused) break;
+                await ecp.sleep(120);
+            }
+            if (!playerFocused) {
+                console.log('  player reached playing but never received scene focus');
+                return false;
+            }
+
+            // state=playing + first-frame projection + root focus are necessary but not sufficient on-device:
+            // a background feed-error dialog can arrive after player creation and consume remote keys. Use an
+            // acknowledged Up reveal as the final readiness oracle, then restore the hidden-HUD baseline every
+            // spec expects. This keeps unrelated startup work out of the player behavior assertions.
+            if (!await revealChrome()) {
+                console.log('  player reached playing/focus but did not accept ECP input');
+                return false;
+            }
+            await press(Key.Back);
+            const resetStart = Date.now();
+            let resetOpacity = await field<number>('#Chrome.opacity');
+            while (resetOpacity !== 0 && Date.now() - resetStart < 7000) {
+                await ecp.sleep(120);
+                resetOpacity = await field<number>('#Chrome.opacity');
+            }
+            if (resetOpacity !== 0) {
+                console.log(`  input probe succeeded but Chrome did not return to hidden (opacity=${resetOpacity})`);
+                return false;
+            }
             return true;
         }
-        if (state === 'error') {
+        if (state === 'error' && loadedContentId === contentId) {
             console.log('  player entered state=error');
             return false;
         }

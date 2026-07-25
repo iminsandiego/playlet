@@ -141,6 +141,11 @@ function OnKeyEvent(key as string, press as boolean) as boolean
             m.top.buttonSelected = true
         end if
         return true
+    else if m.top.hasField("navKey") and (key = RemoteKeys.Up or key = RemoteKeys.Left or key = RemoteKeys.Right or key = RemoteKeys.Options or key = RemoteKeys.Back)
+        ' Opt-in extension point for composite controls that need to own navigation at the focused ButtonEx.
+        ' Ordinary buttons do not declare navKey and retain the existing bubble-to-parent behavior.
+        m.top.navKey = key
+        return true
     end if
 
     return false

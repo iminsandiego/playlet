@@ -1,5 +1,6 @@
 ' VideoPlayerButton @SGNode suite — instantiates just the button, sets its scalar input fields, and asserts
-' the rendered child Posters. Pure projection: toggleState picks the icon, focused tints the circle + icon.
+' the rendered child Posters. Pure projection: toggleState picks the icon; focused and active tint the
+' circle + icon.
 
 namespace Tests
 
@@ -28,6 +29,58 @@ namespace Tests
             m.assertEqual(m.top.findNode("icon").blendColor, m.top.iconColor)
 
             m.top.focused = true
+            m.assertEqual(m.top.findNode("background").blendColor, m.top.focusedBackgroundColor)
+            m.assertEqual(m.top.findNode("icon").blendColor, m.top.focusedIconColor)
+        end function
+
+        @describe("active tint")
+
+        @it("active uses the accent icon tint without changing the selected artwork")
+        function _()
+            m.top.focused = false
+            m.top.toggleState = false
+            m.top.active = true
+            m.assertFalse(m.top.findNode("icon").visible)
+            m.assertTrue(m.top.findNode("icon2").visible)
+            m.assertEqual(m.top.findNode("background").blendColor, m.top.backgroundColor)
+            m.assertEqual(m.top.findNode("icon2").blendColor, m.top.activeIconColor)
+        end function
+
+        @it("focused active keeps the focus circle and uses its active accent")
+        function _()
+            m.top.active = true
+            m.top.focused = true
+            m.assertEqual(m.top.findNode("background").blendColor, m.top.focusedBackgroundColor)
+            m.assertEqual(m.top.findNode("icon").blendColor, m.top.focusedActiveIconColor)
+            m.assertEqual(m.top.findNode("icon2").blendColor, m.top.focusedActiveIconColor)
+        end function
+
+        @describe("disabled tint")
+
+        @it("disabled overrides focus and active colors without changing the selected artwork")
+        function _()
+            m.top.toggleState = false
+            m.top.focused = true
+            m.top.active = true
+            m.top.disabled = true
+            m.assertEqual(m.top.findNode("background").blendColor, m.top.disabledBackgroundColor)
+            m.assertEqual(m.top.findNode("icon").blendColor, m.top.disabledIconColor)
+            m.assertEqual(m.top.findNode("icon2").blendColor, m.top.disabledIconColor)
+            m.assertFalse(m.top.findNode("icon").visible)
+            m.assertTrue(m.top.findNode("icon2").visible)
+        end function
+
+        @it("disabled buttons do not pulse, and re-enabling restores the current focused projection")
+        function _()
+            anim = m.top.findNode("nudgeAnim")
+            m.top.active = false
+            m.top.disabled = true
+            anim.control = "stop"
+            m.top.focused = true
+            m.top.nudge = true
+            m.assertEqual(anim.control, "stop")
+
+            m.top.disabled = false
             m.assertEqual(m.top.findNode("background").blendColor, m.top.focusedBackgroundColor)
             m.assertEqual(m.top.findNode("icon").blendColor, m.top.focusedIconColor)
         end function

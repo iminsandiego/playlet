@@ -10,6 +10,7 @@ function Init()
     m.checkList = m.top.findNode("checkList")
     m.closeButton = m.top.findNode("closeButton")
     m.saveButton = m.top.findNode("saveButton")
+    m.embeddedCloseTimer = m.top.findNode("embeddedCloseTimer")
 
     SetNavigation(m.checkList, RemoteKeys.Down, m.saveButton)
     SetNavigation(m.saveButton, RemoteKeys.Up, m.checkList)
@@ -19,6 +20,9 @@ function Init()
 
     m.saveButton.observeField("buttonSelected", FuncName(OnSaveButtonSelected))
     m.closeButton.observeField("buttonSelected", FuncName(Close))
+    m.saveButton.observeField("navKey", FuncName(OnActionButtonNav))
+    m.closeButton.observeField("navKey", FuncName(OnActionButtonNav))
+    m.embeddedCloseTimer.observeField("fire", FuncName(OnEmbeddedCloseTimer))
 
     AddHighQualityOptions()
 
@@ -75,7 +79,9 @@ function OnFocusChange() as void
         return
     end if
 
-    NodeSetFocus(m.checkList, true)
+    ' Roku's native CheckList consumes every key at its focus boundary, so a modal that starts in the list
+    ' cannot reach Save/Close. Start on Save; Up enters the list, and a changed value returns here.
+    NodeSetFocus(m.saveButton, true)
 end function
 
 function OnKeyEvent(key as string, press as boolean) as boolean
@@ -83,8 +89,27 @@ function OnKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
 
-    if key = RemoteKeys.Options or key = RemoteKeys.Play or key = RemoteKeys.Pause or key = RemoteKeys.PlayOnly
-        ' A pass-through to the app controller, so it can toggle picture-in-picture and pause/play
+    if key = RemoteKeys.Options
+        if m.top.embedded
+            ' Native CheckList consumes every direction, including at its edges, so the configured navigation
+            ' cannot leave it. Native buttons also consume their horizontal boundaries, so Options is the
+            ' explicit Save/Close toggle and must not minimize the video underneath this modal.
+            if m.closeButton.isInFocusChain()
+                NodeSetFocus(m.closeButton, false)
+                NodeSetFocus(m.saveButton, true)
+            else
+                NodeSetFocus(m.checkList, false)
+                NodeSetFocus(m.saveButton, false)
+                NodeSetFocus(m.closeButton, true)
+            end if
+            return true
+        end if
+        ' The standalone settings screen keeps its historic AppController pass-through behavior.
+        return false
+    end if
+
+    if key = RemoteKeys.Play or key = RemoteKeys.Pause or key = RemoteKeys.PlayOnly
+        ' Playback remains a pass-through so the player can pause/resume under either hosting mode.
         return false
     end if
 
@@ -115,7 +140,39 @@ function OnValueChange() as void
     for i = 0 to checkboxes.Count() - 1
         checkedState.push(valuesDict.DoesExist(checkboxes[i].id))
     end for
+    ' This is a projection of an existing preference, not a user gesture. Seed the comparison state before
+    ' writing the CheckList so changing from auto -> a manual set is not mistaken for "Auto was unchecked"
+    ' (the interactive shortcut that intentionally selects every manual quality).
+    m.lastCheckedState = checkedState
     m.checkList.checkedState = checkedState
+    FocusEmbeddedActions()
+end function
+
+function FocusEmbeddedActions() as void
+    if not m.top.embedded or not m.top.focus or not m.checkList.isInFocusChain()
+        return
+    end if
+    NodeSetFocus(m.checkList, false)
+    NodeSetFocus(m.saveButton, true)
+end function
+
+function OnActionButtonNav(event as object) as void
+    button = event.GetRoSGNode()
+    key = ValidString(event.GetData())
+    if button = invalid
+        return
+    end if
+
+    NodeSetFocus(button, false)
+    if key = RemoteKeys.Up
+        NodeSetFocus(m.checkList, true)
+    else if key = RemoteKeys.Back
+        Close()
+    else if button.isSameNode(m.closeButton)
+        NodeSetFocus(m.saveButton, true)
+    else
+        NodeSetFocus(m.closeButton, true)
+    end if
 end function
 
 function OnCheckedStateChange() as void
@@ -188,6 +245,26 @@ function OnSaveButtonSelected()
     Close()
 end function
 
-function Close()
+function Close() as void
+    ' Release the selector's focus before either host removes it. In embedded mode the closed observer is the
+    ' ownership boundary: the player removes this node and restores its own virtual-focus tier. Standalone
+    ' settings retain the existing AppController navigation stack behavior.
+    focusedChild = m.top.focusedChild
+    if focusedChild <> invalid and not focusedChild.isSameNode(m.top)
+        NodeSetFocus(focusedChild, false)
+    end if
+    m.top.focus = false
+
+    if m.top.embedded
+        ' Finish after the current key dispatch unwinds. Removing this modal synchronously from its own Back/OK
+        ' handler can let that same key fall through to the newly exposed player (Back immediately hid the HUD).
+        m.embeddedCloseTimer.control = "stop"
+        m.embeddedCloseTimer.control = "start"
+        return
+    end if
     m.appController@.PopScreen()
+end function
+
+function OnEmbeddedCloseTimer() as void
+    m.top.closed = true
 end function
