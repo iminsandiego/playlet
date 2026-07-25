@@ -1,0 +1,143 @@
+' StatsForNerds @SGNode suite — verifies the overlay in isolation. The fake video is a plain Node so the
+' component must tolerate exactly the fields Roku exposes (and their absence) without a live Video decoder.
+
+namespace Tests
+
+    @SGNode("StatsForNerds")
+    @suite
+    class StatsForNerdsTests extends Rooibos.BaseTestSuite
+
+        protected override function beforeEach()
+            m.top.visible = false
+            m.top.video = invalid
+            m.container = invalid
+            m.video = invalid
+        end function
+
+        @describe("passive fullscreen visibility")
+
+        @it("never takes focus and has no polling timer")
+        function _()
+            m.assertFalse(m.top.focusable)
+            m.assertInvalid(m.top.findNode("pollTimer"))
+        end function
+
+        @it("shows only while preference-visible and fullscreen")
+        function _()
+            m.WireFullVideo(true)
+            m.top.visible = true
+            m.assertTrue(m.top.findNode("statsBg").visible)
+
+            m.container.fullscreen = false
+            m.assertFalse(m.top.findNode("statsBg").visible)
+
+            m.container.fullscreen = true
+            m.assertTrue(m.top.findNode("statsBg").visible)
+
+            m.top.visible = false
+            m.assertFalse(m.top.findNode("statsBg").visible)
+        end function
+
+        @it("detaches while minimized and refreshes from current values on fullscreen restore")
+        function _()
+            m.WireFullVideo(true)
+            m.top.visible = true
+            m.assertEqual(m.Value(2), "1:05")
+
+            m.container.fullscreen = false
+            m.video.position = 120
+            ' No hidden/PiP background work: the rendered value stays untouched while observers are detached.
+            m.assertEqual(m.Value(2), "1:05")
+
+            m.container.fullscreen = true
+            m.assertEqual(m.Value(2), "2:00")
+        end function
+
+        @describe("event-driven stat projection")
+
+        @it("formats fast and stream stats as their fields change")
+        function _()
+            m.WireFullVideo(true)
+            m.top.visible = true
+
+            m.assertEqual(m.Value(1), "playing")
+            m.assertEqual(m.Value(2), "1:05")
+            m.assertEqual(m.Value(3), "1:01:01")
+            m.assertEqual(m.Value(4), "1920 x 1080 @60fps")
+            m.assertEqual(m.Value(5), "av1")
+            m.assertEqual(m.Value(6), "aac")
+            m.assertEqual(m.Value(7), "5.1 Mbps")
+            m.assertEqual(m.Value(8), "mp4")
+
+            m.video.position = 66
+            m.video.state = "paused"
+            m.video.streamingSegment = { width: 1280, height: 720, frameRate: 30, kbps: 2500 }
+            m.assertEqual(m.Value(1), "paused")
+            m.assertEqual(m.Value(2), "1:06")
+            m.assertEqual(m.Value(4), "1280 x 720 @30fps")
+            m.assertEqual(m.Value(7), "2.5 Mbps")
+        end function
+
+        @it("tolerates a video with no optional decoder or content fields")
+        function _()
+            m.container = CreateObject("roSGNode", "Node")
+            m.container.addField("fullscreen", "boolean", false)
+            m.container.fullscreen = true
+
+            m.video = CreateObject("roSGNode", "Node")
+            m.video.addField("container", "node", false)
+            m.video.container = m.container
+
+            m.top.visible = true
+            m.top.video = m.video
+            m.assertTrue(m.top.findNode("statsBg").visible)
+            for i = 1 to 8
+                m.assertEqual(m.Value(i), "")
+            end for
+        end function
+
+        private function WireFullVideo(fullscreen as boolean) as void
+            m.container = CreateObject("roSGNode", "Node")
+            m.container.addField("fullscreen", "boolean", false)
+            m.container.fullscreen = fullscreen
+
+            content = CreateObject("roSGNode", "ContentNode")
+            content.addField("metadata", "assocarray", false)
+            content.url = "https://media.example/videoplayback?container=mp4"
+            content.metadata = {
+                adaptiveFormats: [
+                    { type: "video/mp4", height: 1080, bitrate: 5100000 }
+                ]
+            }
+
+            m.video = CreateObject("roSGNode", "Node")
+            m.video.addField("container", "node", false)
+            m.video.addField("state", "string", false)
+            m.video.addField("position", "float", false)
+            m.video.addField("duration", "float", false)
+            m.video.addField("content", "node", false)
+            m.video.addField("streamingSegment", "assocarray", false)
+            m.video.addField("videoFormat", "string", false)
+            m.video.addField("audioFormat", "string", false)
+            m.video.addField("bitrate", "integer", false)
+            m.video.setFields({
+                container: m.container
+                state: "playing"
+                position: 65
+                duration: 3661
+                content: content
+                streamingSegment: { width: 1920, height: 1080, fps: 60, bitrate: 5100000 }
+                videoFormat: "av1"
+                audioFormat: "aac"
+                bitrate: 5100000
+            })
+            m.top.video = m.video
+        end function
+
+        private function Value(line as integer) as string
+            return m.top.findNode("line" + line.toStr() + "Value").text
+        end function
+
+    end class
+
+end namespace

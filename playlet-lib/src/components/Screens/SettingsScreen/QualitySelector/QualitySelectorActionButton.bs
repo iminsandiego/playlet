@@ -1,0 +1,21 @@
+import "pkg:/source/utils/RemoteKeys.bs"
+
+' ButtonEx owns OK at the focused-node scope. This selector also needs deterministic action-row navigation
+' because SceneGraph does not reliably bubble boundary keys through every Roku OS/native-control combination.
+function OnKeyEvent(key as string, press as boolean) as boolean
+    if not press
+        return false
+    end if
+
+    if key = RemoteKeys.Ok
+        if not m.top.disabled
+            m.top.buttonSelected = true
+        end if
+        return true
+    else if key = RemoteKeys.Up or key = RemoteKeys.Left or key = RemoteKeys.Right or key = RemoteKeys.Options or key = RemoteKeys.Back
+        m.top.navKey = key
+        return true
+    end if
+
+    return false
+end function

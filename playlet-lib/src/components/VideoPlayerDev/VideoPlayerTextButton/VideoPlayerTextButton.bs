@@ -1,0 +1,57 @@
+import "pkg:/source/utils/Types.bs"
+
+function Init()
+    m.background = m.top.findNode("background")
+    m.label = m.top.findNode("label")
+    m.anchor = m.top.findNode("anchor")
+    m.nudgeAnim = m.top.findNode("nudgeAnim")
+    m.anchor.scaleRotateCenter = [m.top.buttonWidth / 2, m.background.height / 2]
+
+    m.top.ObserveField("focused", FuncName(OnFocused))
+    m.top.ObserveField("active", FuncName(Repaint))
+    m.top.ObserveField("disabled", FuncName(Repaint))
+    m.top.ObserveField("nudge", FuncName(OnNudge))
+    Repaint()
+end function
+
+function OnFocused() as void
+    Repaint()
+    if m.top.focused and not m.top.disabled
+        Pulse()
+    end if
+end function
+
+function OnNudge() as void
+    if not m.top.disabled
+        Pulse()
+    end if
+end function
+
+function Pulse() as void
+    m.nudgeAnim.control = "stop"
+    m.nudgeAnim.control = "start"
+end function
+
+function Repaint() as void
+    if m.top.disabled
+        m.background.color = m.top.disabledBackgroundColor
+        m.label.color = m.top.disabledTextColor
+        return
+    end if
+
+    if m.top.focused
+        m.background.color = m.top.focusedBackgroundColor
+        if m.top.active
+            m.label.color = m.top.focusedActiveTextColor
+        else
+            m.label.color = m.top.focusedTextColor
+        end if
+    else
+        m.background.color = m.top.backgroundColor
+        if m.top.active
+            m.label.color = m.top.activeTextColor
+        else
+            m.label.color = m.top.textColor
+        end if
+    end if
+end function

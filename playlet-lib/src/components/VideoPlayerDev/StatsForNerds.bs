@@ -1,0 +1,519 @@
+import "pkg:/source/utils/Locale.bs"
+import "pkg:/source/utils/StringUtils.bs"
+import "pkg:/source/utils/Types.bs"
+import "pkg:/source/utils/UrlUtils.bs"
+
+' Stats for Nerds is deliberately event-driven. Device fields are observed only while the preference-visible
+' overlay is fullscreen; PiP/hidden states detach the observers instead of leaving a background polling timer.
+function Init() as void
+    m.top.focusable = false
+    m.statsBg = m.top.findNode("statsBg")
+
+    m.lineValues = []
+    labels = [
+        Tr(Locale.VideoPlayer.StatsState)
+        Tr(Locale.VideoPlayer.StatsPosition)
+        Tr(Locale.VideoPlayer.StatsDuration)
+        Tr(Locale.VideoPlayer.StatsResolution)
+        Tr(Locale.VideoPlayer.StatsVideoFormat)
+        Tr(Locale.VideoPlayer.StatsAudioFormat)
+        Tr(Locale.VideoPlayer.StatsBitrate)
+        Tr(Locale.VideoPlayer.StatsContainer)
+    ]
+    for i = 0 to labels.Count() - 1
+        lineNumber = i + 1
+        label = m.top.findNode("line" + lineNumber.toStr() + "Label")
+        if label <> invalid
+            label.text = labels[i]
+        end if
+        m.lineValues.Push(m.top.findNode("line" + lineNumber.toStr() + "Value"))
+    end for
+
+    m.video = invalid
+    m.container = invalid
+    m.isStatsVisible = false
+    m.observingVideoFields = false
+    ResetVideoCaches()
+
+    m.top.observeFieldScoped("visible", FuncName(OnVisibleChanged))
+    m.top.observeFieldScoped("video", FuncName(OnVideoChanged))
+    OnVideoChanged()
+end function
+
+function SetValue(index as integer, text as string) as void
+    if index < 1 or index > m.lineValues.Count()
+        return
+    end if
+
+    value = m.lineValues[index - 1]
+    if value <> invalid and value.text <> text
+        value.text = text
+    end if
+end function
+
+function OnVideoChanged() as void
+    newVideo = m.top.video
+    if m.video <> invalid and newVideo <> invalid and m.video.isSameNode(newVideo)
+        UpdateVisibility()
+        return
+    end if
+
+    UnobserveVideoFields()
+    UnobserveContainer()
+    m.video = newVideo
+    ResetVideoCaches()
+
+    if m.video <> invalid and m.video.hasField("container")
+        ObserveContainer(m.video.container)
+    end if
+    UpdateVisibility()
+end function
+
+function OnVisibleChanged() as void
+    UpdateVisibility()
+end function
+
+function OnFullscreenChanged() as void
+    UpdateVisibility()
+end function
+
+function UpdateVisibility() as void
+    shouldShow = m.top.visible = true and m.video <> invalid and m.container <> invalid
+    if shouldShow and m.container.hasField("fullscreen")
+        shouldShow = m.container.fullscreen = true
+    else
+        shouldShow = false
+    end if
+
+    m.isStatsVisible = shouldShow
+    if m.statsBg <> invalid
+        m.statsBg.visible = shouldShow
+    end if
+
+    if shouldShow
+        ObserveVideoFields()
+        RefreshStats()
+    else
+        UnobserveVideoFields()
+    end if
+end function
+
+function ObserveVideoFields() as void
+    if m.video = invalid or m.observingVideoFields
+        return
+    end if
+
+    for each fieldName in ["state", "position", "duration"]
+        if m.video.hasField(fieldName)
+            m.video.observeFieldScoped(fieldName, FuncName(OnFastStatsFieldChanged))
+        end if
+    end for
+    if m.video.hasField("content")
+        m.video.observeFieldScoped("content", FuncName(OnContentFieldChanged))
+    end if
+    for each fieldName in ["streamingSegment", "videoFormat", "audioFormat", "bitrate"]
+        if m.video.hasField(fieldName)
+            m.video.observeFieldScoped(fieldName, FuncName(OnHeavyStatsFieldChanged))
+        end if
+    end for
+    m.observingVideoFields = true
+end function
+
+function UnobserveVideoFields() as void
+    if m.video = invalid or not m.observingVideoFields
+        return
+    end if
+
+    for each fieldName in ["state", "position", "duration", "content", "streamingSegment", "videoFormat", "audioFormat", "bitrate"]
+        if m.video.hasField(fieldName)
+            m.video.unobserveFieldScoped(fieldName)
+        end if
+    end for
+    m.observingVideoFields = false
+end function
+
+function OnFastStatsFieldChanged(_event as object) as void
+    if m.isStatsVisible
+        UpdateFastStats()
+    end if
+end function
+
+function OnHeavyStatsFieldChanged(_event as object) as void
+    if m.isStatsVisible
+        UpdateHeavyStats()
+    end if
+end function
+
+function OnContentFieldChanged(_event as object) as void
+    ResetVideoCaches()
+    RefreshStats()
+end function
+
+function RefreshStats() as void
+    if not m.isStatsVisible
+        return
+    end if
+    if m.video = invalid
+        ClearValues()
+        return
+    end if
+    UpdateFastStats()
+    UpdateHeavyStats()
+end function
+
+function UpdateFastStats() as void
+    if m.video = invalid
+        ClearValues()
+        return
+    end if
+    SetValue(1, ToStrSafe(GetFieldSafe(m.video, "state", "")))
+    SetValue(2, FormatTime(GetFieldSafe(m.video, "position", invalid)))
+    SetValue(3, FormatTime(GetFieldSafe(m.video, "duration", invalid)))
+end function
+
+function UpdateHeavyStats() as void
+    if m.video = invalid
+        ResetValueCachesOnly()
+        return
+    end if
+
+    content = GetFieldSafe(m.video, "content", invalid)
+    segment = GetFieldSafe(m.video, "streamingSegment", invalid)
+    width = invalid
+    height = invalid
+    fpsText = ""
+    bitrateValue = invalid
+
+    if IsAssociativeArray(segment)
+        width = ParseNumeric(Lookup(segment, "width"))
+        height = ParseNumeric(Lookup(segment, "height"))
+        fpsValue = Lookup(segment, "fps")
+        if fpsValue = invalid
+            fpsValue = Lookup(segment, "frameRate")
+        end if
+        fpsText = ToStrSafe(fpsValue)
+        bitrateValue = ExtractSegmentBitrate(segment)
+    end if
+
+    resolutionText = ""
+    if width <> invalid and height <> invalid and width > 0 and height > 0
+        resolutionText = width.toStr() + " x " + height.toStr()
+        if not StringUtils.IsNullOrEmpty(fpsText)
+            resolutionText += " @" + fpsText + "fps"
+        end if
+    end if
+    if not StringUtils.IsNullOrEmpty(resolutionText)
+        m.lastResolutionText = resolutionText
+    end if
+
+    if bitrateValue = invalid or bitrateValue <= 0
+        bitrateValue = ParseNumeric(GetFieldSafe(m.video, "bitrate", invalid))
+    end if
+    if (bitrateValue = invalid or bitrateValue <= 0) and height <> invalid and height > 0
+        bitrateValue = InferBitrateFromContentMetadata(content, height)
+    end if
+    bitrateText = FormatBitrate(bitrateValue)
+    if not StringUtils.IsNullOrEmpty(bitrateText)
+        m.lastBitrateText = bitrateText
+    end if
+
+    videoFormat = ValidString(GetFieldSafe(m.video, "videoFormat", ""))
+    if not StringUtils.IsNullOrEmpty(videoFormat)
+        m.lastVideoFormatText = videoFormat
+    end if
+    audioFormat = ValidString(GetFieldSafe(m.video, "audioFormat", ""))
+    if not StringUtils.IsNullOrEmpty(audioFormat)
+        m.lastAudioFormatText = audioFormat
+    end if
+
+    url = ""
+    if content <> invalid and content.hasField("url")
+        url = ValidString(content.url)
+    end if
+    UpdateContainerCache(url)
+
+    SetValue(4, m.lastResolutionText)
+    SetValue(5, m.lastVideoFormatText)
+    SetValue(6, m.lastAudioFormatText)
+    SetValue(7, m.lastBitrateText)
+    SetValue(8, m.cachedContainer)
+end function
+
+function Lookup(aa as object, key as string) as dynamic
+    if aa = invalid or not aa.DoesExist(key)
+        return invalid
+    end if
+    return aa[key]
+end function
+
+function InferBitrateFromContentMetadata(content as object, targetHeight as integer) as dynamic
+    if content = invalid or targetHeight <= 0
+        return invalid
+    end if
+    if targetHeight = m.cachedMetaBitrateHeight and m.cachedMetaBitrate <> invalid
+        return m.cachedMetaBitrate
+    end if
+    if targetHeight = m.cachedMetaMissHeight
+        return invalid
+    end if
+
+    metadata = GetFieldSafe(content, "metadata", invalid)
+    if not IsAssociativeArray(metadata)
+        m.cachedMetaMissHeight = targetHeight
+        return invalid
+    end if
+    formats = ValidArray(metadata.adaptiveFormats)
+    if formats.Count() = 0
+        formats = ValidArray(metadata.formatStreams)
+    end if
+
+    bestBitrate = 0
+    for each format in formats
+        if not IsAssociativeArray(format)
+            continue for
+        end if
+        mimeType = ValidString(Lookup(format, "type"))
+        if StringUtils.IsNullOrEmpty(mimeType) or not mimeType.StartsWith("video/")
+            continue for
+        end if
+        if ParseFormatHeight(format) <> targetHeight
+            continue for
+        end if
+        bitrate = ParseNumeric(Lookup(format, "bitrate"))
+        if bitrate <> invalid and bitrate > bestBitrate
+            bestBitrate = bitrate
+        end if
+    end for
+
+    if bestBitrate > 0
+        m.cachedMetaBitrateHeight = targetHeight
+        m.cachedMetaBitrate = bestBitrate
+        m.cachedMetaMissHeight = -1
+        return bestBitrate
+    end if
+    m.cachedMetaMissHeight = targetHeight
+    return invalid
+end function
+
+function ParseFormatHeight(format as object) as integer
+    height = ParseNumeric(Lookup(format, "height"))
+    if height <> invalid
+        return height
+    end if
+    for each key in ["size", "resolution"]
+        value = ValidString(Lookup(format, key))
+        if not StringUtils.IsNullOrEmpty(value)
+            height = ParseResolutionHeight(value)
+            if height > 0
+                return height
+            end if
+        end if
+    end for
+    return 0
+end function
+
+function ParseResolutionHeight(value as string) as integer
+    if StringUtils.IsNullOrEmpty(value)
+        return 0
+    end if
+    normalized = LCase(value.Trim())
+    if normalized.InStr("x") <> -1
+        parts = normalized.Split("x")
+        if parts.Count() >= 2
+            return CInt(Val(parts[1]))
+        end if
+    end if
+    if normalized.EndsWith("p")
+        return CInt(Val(normalized.Left(normalized.Len() - 1)))
+    end if
+    return CInt(Val(normalized))
+end function
+
+function ExtractSegmentBitrate(segment as object) as dynamic
+    for each key in ["bitrate", "bandwidth", "avgBitrate", "averageBitrate", "bitsPerSecond", "bps", "kbps", "kbitrate", "bandwidthKbps"]
+        value = ParseNumeric(Lookup(segment, key))
+        if value <> invalid
+            lowerKey = LCase(key)
+            if lowerKey = "kbps" or lowerKey.InStr("kbitrate") <> -1 or lowerKey.InStr("bandwidthkbps") <> -1
+                return value * 1000
+            end if
+            return value
+        end if
+    end for
+    return invalid
+end function
+
+function UpdateContainerCache(url as string) as void
+    if StringUtils.IsNullOrEmpty(url)
+        m.cachedContainerUrl = ""
+        m.cachedContainer = ""
+        return
+    end if
+    if url = m.cachedContainerUrl
+        return
+    end if
+
+    m.cachedContainerUrl = url
+    query = ParseUrlQuery(url)
+    containerParam = ExtractQueryValue(query, "container")
+    if not StringUtils.IsNullOrEmpty(containerParam)
+        m.cachedContainer = containerParam
+    else
+        m.cachedContainer = InferContainerFromUrl(url)
+    end if
+end function
+
+function ParseUrlQuery(url as string) as object
+    if StringUtils.IsNullOrEmpty(url) or url.InStr("?") = -1
+        return {}
+    end if
+    return UrlUtils.ParseQueryComponents(url)
+end function
+
+function ExtractQueryValue(query as object, key as string) as string
+    if query = invalid or not query.DoesExist(key)
+        return ""
+    end if
+    value = query[key]
+    if IsArray(value)
+        if value.Count() = 0
+            return ""
+        end if
+        value = value[0]
+    end if
+    return ValidString(value)
+end function
+
+function InferContainerFromUrl(url as string) as string
+    lower = LCase(url)
+    if lower.InStr(".mpd") <> -1 or lower.InStr("/dash") <> -1 or lower.InStr("/mux") <> -1
+        return "dash"
+    else if lower.InStr(".m3u8") <> -1
+        return "hls"
+    else if lower.InStr(".webm") <> -1
+        return "webm"
+    else if lower.InStr(".mkv") <> -1
+        return "mkv"
+    else if lower.InStr(".mp4") <> -1
+        return "mp4"
+    end if
+    return ""
+end function
+
+function FormatBitrate(value as dynamic) as string
+    bitrate = ParseNumeric(value)
+    if bitrate = invalid or bitrate <= 0
+        return ""
+    end if
+    if bitrate >= 1000000
+        scaled = (bitrate + 50000) \ 100000
+        return (scaled \ 10).toStr() + "." + (scaled mod 10).toStr() + " Mbps"
+    else if bitrate >= 1000
+        return (bitrate \ 1000).toStr() + " kbps"
+    end if
+    return bitrate.toStr() + " bps"
+end function
+
+function FormatTime(value as dynamic) as string
+    seconds = NormalizeSeconds(value)
+    if seconds < 0
+        return ""
+    end if
+    hours = seconds \ 3600
+    minutes = (seconds mod 3600) \ 60
+    seconds = seconds mod 60
+    if hours > 0
+        return hours.toStr() + ":" + Pad2(minutes) + ":" + Pad2(seconds)
+    end if
+    return minutes.toStr() + ":" + Pad2(seconds)
+end function
+
+function Pad2(value as integer) as string
+    if value < 10
+        return "0" + value.toStr()
+    end if
+    return value.toStr()
+end function
+
+function ToStrSafe(value as dynamic) as string
+    if value = invalid
+        return ""
+    end if
+    return value.toStr()
+end function
+
+function GetFieldSafe(node as object, fieldName as string, defaultValue as dynamic) as dynamic
+    if node <> invalid and node.hasField(fieldName)
+        return node[fieldName]
+    end if
+    return defaultValue
+end function
+
+function ParseNumeric(value as dynamic) as dynamic
+    if IsInt(value)
+        return value
+    else if IsFloat(value) or IsDouble(value)
+        return CInt(value)
+    else if IsString(value)
+        parsed = Val(value)
+        if parsed > 0
+            return CInt(parsed)
+        end if
+    end if
+    return invalid
+end function
+
+function NormalizeSeconds(value as dynamic) as integer
+    if IsInt(value)
+        return value
+    else if IsFloat(value) or IsDouble(value)
+        return CInt(value)
+    else if IsString(value)
+        return CInt(Val(value))
+    end if
+    return -1
+end function
+
+function ClearValues() as void
+    for i = 1 to m.lineValues.Count()
+        SetValue(i, "")
+    end for
+end function
+
+function ResetVideoCaches() as void
+    m.cachedContainerUrl = ""
+    m.cachedContainer = ""
+    m.cachedMetaBitrateHeight = -1
+    m.cachedMetaBitrate = invalid
+    m.cachedMetaMissHeight = -1
+    ResetValueCachesOnly()
+end function
+
+function ResetValueCachesOnly() as void
+    m.lastResolutionText = ""
+    m.lastBitrateText = ""
+    m.lastVideoFormatText = ""
+    m.lastAudioFormatText = ""
+end function
+
+function ObserveContainer(container as object) as void
+    if container = invalid or not container.hasField("fullscreen")
+        return
+    end if
+    m.container = container
+    m.container.observeFieldScoped("fullscreen", FuncName(OnFullscreenChanged))
+end function
+
+function UnobserveContainer() as void
+    if m.container <> invalid
+        m.container.unobserveFieldScoped("fullscreen")
+        m.container = invalid
+    end if
+end function
+
+function OnDispose() as void
+    UnobserveVideoFields()
+    UnobserveContainer()
+    m.top.unobserveFieldScoped("visible")
+    m.top.unobserveFieldScoped("video")
+end function
