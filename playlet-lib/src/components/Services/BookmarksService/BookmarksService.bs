@@ -44,6 +44,9 @@ function Save() as void
     bookmarkGroupNodes = m.top.content.getChildren(-1, 0)
     if bookmarkGroupNodes.Count() = 0
         RegistryUtils.Delete(RegistryUtils.BOOKMARKS)
+        ' Keep the in-memory persistence snapshot aligned with the deleted key. Otherwise re-adding the same
+        ' last bookmark produces the same JSON and the equality fast-path incorrectly skips recreating it.
+        m.bookmarksString = ""
         return
     end if
 

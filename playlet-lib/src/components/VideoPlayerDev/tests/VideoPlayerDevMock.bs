@@ -51,15 +51,27 @@ function TestSetup() as void
 
     m.top.jobQueue = createObject("roSGNode", "Node")
     m.top.notifications = createObject("roSGNode", "Node")
-    m.top.preferences = createObject("roSGNode", "Node")
+    preferences = createObject("roSGNode", "Node")
+    preferences.addField("playback.stats_for_nerds", "boolean", false)
+    preferences.addField("playback.preferred_quality", "string", false)
+    preferences["playback.preferred_quality"] = "auto"
+    m.top.preferences = preferences
     m.top.invidious = createObject("roSGNode", "Node")
     ' the queue stub carries the fields the finish/close paths touch (VideoQueueUtils.PlayNext reads hasNext;
     ' ClosePlayer writes closePlayer — the spec asserts it).
     videoQueue = createObject("roSGNode", "Node")
+    videoQueue.addField("hasPrevious", "boolean", false)
     videoQueue.addField("hasNext", "boolean", false)
+    videoQueue.addField("previous", "boolean", true)
+    videoQueue.addField("next", "boolean", true)
     videoQueue.addField("closePlayer", "boolean", false)
     m.top.videoQueue = videoQueue
+    m.top.queuePreviousCount = 0
+    m.top.queueNextCount = 0
+    videoQueue.observeFieldScoped("previous", FuncName(OnTestQueuePrevious))
+    videoQueue.observeFieldScoped("next", FuncName(OnTestQueueNext))
     m.top.loungeService = createObject("roSGNode", "Node")
+    m.top.bookmarksService = CreateObject("roSGNode", "BookmarksServiceMock")
     m.top.appController = createObject("roSGNode", "Node")
     m.top.webServer = createObject("roSGNode", "Node")
     m.top.innertube = createObject("roSGNode", "Node")
@@ -71,6 +83,7 @@ function TestSetup() as void
     m.invidious = m.top.invidious
     m.videoQueue = m.top.videoQueue
     m.loungeService = m.top.loungeService
+    m.bookmarksService = m.top.bookmarksService
     m.notifications = m.top.notifications
     m.appController = m.top.appController
     m.webServer = m.top.webServer
@@ -80,15 +93,25 @@ function TestSetup() as void
     ' nudge counter above — stacked observers fire a handler once per prior TestSetup on every write,
     ' and OnPosition's latency learning reads two identical fires as a CONFIRMED min-gap, poisoning
     ' LiveEdgeMs for any live test that runs after another test in the suite.
-    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control"]
+    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control", "globalCaptionMode"]
         m.top.unobserveField(deviceField)
     end for
+    m.top.globalCaptionMode = "Off"
+    m.top.content = invalid
 
     OnNodeReady()
 end function
 
 function OnTestNudge() as void
     m.top.nudgeCount += 1
+end function
+
+function OnTestQueuePrevious() as void
+    m.top.queuePreviousCount += 1
+end function
+
+function OnTestQueueNext() as void
+    m.top.queueNextCount += 1
 end function
 
 ' TestKey — drive a remote key through the REAL OnKeyEvent (scrub/scan/commit/etc).
@@ -116,6 +139,33 @@ function TestSetLive(edgeMs as integer) as void
     m.trickPlayBar.canRewind = m.transport.CanRewindLive()
     m.transport.OnLiveEdge(edgeMs)
     m.transport.OnPosition(edgeMs)
+    SyncFocus()
+end function
+
+function TestSetVideoId(videoId as string) as void
+    content = CreateObject("roSGNode", "ContentNode")
+    content.addField("videoId", "string", false)
+    content.videoId = videoId
+    m.top.content = content
+    SyncBookmarkState()
+end function
+
+function TestAddBookmarkExternally(videoId as string) as void
+    m.bookmarksService@.AddVideoBookmark(videoId, "Videos")
+end function
+
+function TestSaveQuality(value as string) as void
+    if m.qualitySelector = invalid
+        return
+    end if
+    m.qualitySelector.value = value
+    m.qualitySelector.save = true
+end function
+
+function TestCloseQuality() as void
+    if m.qualitySelector <> invalid
+        m.qualitySelector.closed = true
+    end if
 end function
 
 ' TestFireLiveBadgeHold — fire the liveBadgeHold timer's handler now (the spec can't wait out the real timer).
@@ -201,14 +251,35 @@ function TestSnapshot() as object
         brainEdgeMs: m.transport.edgeMs
         onCloseCalled: m.onCloseCalled = true
         control: m.top.control
+        seek: m.top.seek
         autoplay: m.top.autoplayAfterSeek
         bifVisible: m.bifDisplay.visible
         chromeShown: (m.chromeMode = ChromeMode.Shown or m.chromeMode = ChromeMode.FadingIn)
         chromeFadingOut: (m.chromeMode = ChromeMode.FadingOut)
         autoHideControl: m.autoHide.control
         suppressCaptions: m.top.suppressCaptions
+        globalCaptionMode: m.top.globalCaptionMode
+        captionsEnabled: m.captionsEnabled
+        captionsActive: m.buttonRow.findNode("CaptionsButton").active
         focusTarget: m.focusTarget
         focusedButton: m.focusedButton
+        statsEnabled: m.statsEnabled
+        statsOverlayPresent: m.statsForNerds <> invalid
+        qualitySelectorPresent: m.qualitySelector <> invalid
+        qualityPreference: m.top.preferences["playback.preferred_quality"]
+        qualityLabel: m.buttonRow.qualityLabel
+        previousDisabled: m.buttonRow.findNode("PreviousButton").disabled
+        nextDisabled: m.buttonRow.findNode("NextButton").disabled
+        skipBackDisabled: m.buttonRow.findNode("SkipBackButton").disabled
+        skipForwardDisabled: m.buttonRow.findNode("SkipForwardButton").disabled
+        bookmarkAvailable: m.bookmarkAvailable
+        bookmarked: m.bookmarked
+        bookmarkDisabled: m.buttonRow.findNode("BookmarkButton").disabled
+        bookmarkActive: m.buttonRow.findNode("BookmarkButton").active
+        bookmarkAddCount: m.bookmarksService.addCount
+        bookmarkRemoveCount: m.bookmarksService.removeCount
+        queuePreviousCount: m.top.queuePreviousCount
+        queueNextCount: m.top.queueNextCount
         nudgeCount: m.top.nudgeCount
         forceLiveBadge: m.trickPlayBar.forceLiveBadge
         liveBadgeShown: m.trickPlayBar.findNode("liveLabel").visible

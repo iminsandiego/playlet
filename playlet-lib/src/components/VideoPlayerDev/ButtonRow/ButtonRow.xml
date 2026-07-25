@@ -15,22 +15,49 @@
     <interface>
         <field id="transportMode" type="integer" value="0" />
         <field id="rowFocused" type="boolean" value="false" />
-        <field id="focusedIndex" type="integer" value="0" />
+        <field id="focusedIndex" type="integer" value="2" />
         <field id="playing" type="boolean" value="true" /> <!-- selects the play vs pause icon -->
+        <field id="previousEnabled" type="boolean" value="false" />
+        <field id="skipEnabled" type="boolean" value="true" /> <!-- false for live playback -->
+        <field id="nextEnabled" type="boolean" value="false" />
+        <!-- Kept as player state for tests/telemetry; the control itself uses the standard quality gear. -->
+        <field id="qualityLabel" type="string" value="" />
+        <field id="captionsEnabled" type="boolean" value="false" /> <!-- any global mode except Off -->
+        <field id="statsEnabled" type="boolean" value="false" /> <!-- selects + accents the stats icon -->
+        <field id="bookmarkAvailable" type="boolean" value="false" /> <!-- requires a current videoId -->
+        <field id="bookmarked" type="boolean" value="false" />
         <field id="buttonCount" type="integer" value="0" /> <!-- read-only: set in Init from m.buttons -->
         <!-- pulse the focused button's scale nudge (a press that couldn't move focus: Left/Right clamped at
              the row's ends, Up at the top tier). -->
         <field id="nudge" type="boolean" alwaysNotify="true" />
     </interface>
     <children>
-        <!-- play/pause, centered on screen (x=640). -->
+        <!-- Queue + transport controls, centered on screen (x=640). -->
         <Group id="CenterCluster">
+            <VideoPlayerButton id="PreviousButton"
+                iconUri="pkg:/images/icons/player/previous.png" />
+            <VideoPlayerButton id="SkipBackButton"
+                iconUri="pkg:/images/icons/player/skip-back.png" />
             <VideoPlayerButton id="PlayPauseButton"
                 iconUri="pkg:/images/icons/player/play.png"
                 iconUri2="pkg:/images/icons/player/pause.png" />
+            <VideoPlayerButton id="SkipForwardButton"
+                iconUri="pkg:/images/icons/player/skip-forward.png" />
+            <VideoPlayerButton id="NextButton"
+                iconUri="pkg:/images/icons/player/next.png" />
         </Group>
-        <!-- minimize, right-aligned to the trackbar's right edge (x=1212). -->
+        <!-- Feature controls, right-aligned to the trackbar's right edge (x=1212). -->
         <Group id="RightCluster">
+            <VideoPlayerButton id="QualityButton"
+                iconUri="pkg:/images/icons/player/quality.png" />
+            <VideoPlayerButton id="CaptionsButton"
+                iconUri="pkg:/images/icons/player/cc-off.png"
+                iconUri2="pkg:/images/icons/player/cc-on.png" />
+            <VideoPlayerButton id="StatsButton"
+                iconUri="pkg:/images/icons/player/stats-off.png"
+                iconUri2="pkg:/images/icons/player/stats-on.png" />
+            <VideoPlayerButton id="BookmarkButton"
+                iconUri="pkg:/images/icons/player/bookmark.png" />
             <VideoPlayerButton id="MinimizeButton"
                 iconUri="pkg:/images/icons/player/minimize.png" />
         </Group>

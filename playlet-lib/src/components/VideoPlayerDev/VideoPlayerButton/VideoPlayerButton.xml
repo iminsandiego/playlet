@@ -11,8 +11,17 @@
 
         <field id="iconColor" type="color" value="#DDDDDD" />
         <field id="focusedIconColor" type="color" value="#262626" />
+        <!-- Active is independent of toggleState: toggleState selects the icon artwork, while active selects
+             its accent tint. This lets controls such as Stats for Nerds show both an "on" glyph and an
+             enabled-state color without taking real SceneGraph focus. -->
+        <field id="activeIconColor" type="color" value="#FF1C30" />
+        <field id="focusedActiveIconColor" type="color" value="#B00014" />
+        <field id="disabledIconColor" type="color" value="#707070" />
+        <field id="disabledBackgroundColor" type="color" value="#292929" />
 
         <field id="focused" type="boolean" value="false" />
+        <field id="active" type="boolean" value="false" />
+        <field id="disabled" type="boolean" value="false" />
         <!-- pulse the scale nudge: confirms a press that didn't move focus (Left/Right at the row's end,
              Up at the top tier). -->
         <field id="nudge" type="boolean" alwaysNotify="true" />

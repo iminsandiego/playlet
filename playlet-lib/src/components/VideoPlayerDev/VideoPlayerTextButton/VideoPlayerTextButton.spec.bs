@@ -1,0 +1,43 @@
+namespace Tests
+
+    @SGNode("VideoPlayerTextButton")
+    @suite
+    class VideoPlayerTextButtonTests extends Rooibos.BaseTestSuite
+
+        @describe("projection")
+
+        @it("projects virtual focus, active, and disabled colors")
+        function _()
+            background = m.top.findNode("background")
+            label = m.top.findNode("label")
+
+            m.top.focused = true
+            m.assertEqual(background.color, m.top.focusedBackgroundColor)
+            m.assertEqual(label.color, m.top.focusedTextColor)
+
+            m.top.active = true
+            m.assertEqual(label.color, m.top.focusedActiveTextColor)
+
+            m.top.disabled = true
+            m.assertEqual(background.color, m.top.disabledBackgroundColor)
+            m.assertEqual(label.color, m.top.disabledTextColor)
+        end function
+
+        @describe("nudge")
+
+        @it("pulses only while enabled")
+        function _()
+            anim = m.top.findNode("nudgeAnim")
+            m.top.disabled = true
+            anim.control = "stop"
+            m.top.nudge = true
+            m.assertEqual(anim.control, "stop")
+
+            m.top.disabled = false
+            m.top.nudge = true
+            m.assertEqual(anim.control, "start")
+        end function
+
+    end class
+
+end namespace

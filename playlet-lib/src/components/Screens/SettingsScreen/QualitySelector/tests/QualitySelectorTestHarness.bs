@@ -1,0 +1,8 @@
+function TestKey(key as string, press as boolean) as boolean
+    return OnKeyEvent(key, press)
+end function
+
+function TestCompleteClose() as void
+    m.embeddedCloseTimer.control = "stop"
+    OnEmbeddedCloseTimer()
+end function

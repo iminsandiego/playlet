@@ -1,0 +1,91 @@
+' QualitySelector @SGNode suite — exercises the player-hosted close contract without an AppController stack.
+' The production hardware probe still decides whether AV1-only 1440p/2160p entries are present.
+
+import "pkg:/source/utils/CodecCapabilities.bs"
+import "pkg:/source/utils/RemoteKeys.bs"
+
+namespace Tests
+
+    @SGNode("QualitySelectorTestHarness")
+    @suite
+    class QualitySelectorTests extends Rooibos.BaseTestSuite
+
+        protected override function beforeEach()
+            m.top.embedded = true
+            m.top.save = false
+            m.top.closed = false
+            m.top.value = "auto"
+            m.top.focus = true
+        end function
+
+        @describe("embedded close contract")
+
+        @it("save publishes the complete multi-quality value and then closes")
+        function _()
+            m.top.value = "1080p,720p"
+
+            m.top.findNode("saveButton").buttonSelected = true
+            m.assertFalse(m.top.closed, "embedded removal is deferred until the activating key unwinds")
+            m.top.callFunc("TestCompleteClose")
+
+            m.assertTrue(m.top.save)
+            m.assertTrue(m.top.closed)
+            m.assertEqual(m.top.value, "1080p,720p")
+            m.assertFalse(m.top.focus)
+        end function
+
+        @it("cancel closes without publishing save or changing the selected value")
+        function _()
+            m.top.value = "480p,360p"
+            m.top.findNode("closeButton").buttonSelected = true
+            m.assertFalse(m.top.closed, "embedded removal is deferred until the activating key unwinds")
+            m.top.callFunc("TestCompleteClose")
+
+            m.assertFalse(m.top.save)
+            m.assertTrue(m.top.closed)
+            m.assertEqual(m.top.value, "480p,360p")
+            m.assertFalse(m.top.focus)
+        end function
+
+        @it("consumes Options while embedded but keeps playback keys delegated to the player")
+        function _()
+            m.assertTrue(m.top.callFunc("TestKey", RemoteKeys.Options, true))
+            m.assertTrue(m.top.findNode("closeButton").isInFocusChain(), "Options toggles Save to Close")
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.Play, true))
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.Pause, true))
+
+            m.top.embedded = false
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.Options, true))
+        end function
+
+        @describe("quality options")
+
+        @it("keeps 1440p and 2160p gated on the device AV1 decoder")
+        function _()
+            ids = m.QualityIds()
+            if CodecCapabilities.CanDecodeAv1()
+                m.assertTrue(ids.DoesExist("1440p"))
+                m.assertTrue(ids.DoesExist("2160p"))
+            else
+                m.assertFalse(ids.DoesExist("1440p"))
+                m.assertFalse(ids.DoesExist("2160p"))
+            end if
+
+            ' The complete existing non-AV1 quality set remains selectable in both capability branches.
+            for each quality in ["auto", "1080p", "720p", "480p", "360p", "240p", "144p"]
+                m.assertTrue(ids.DoesExist(quality), "missing " + quality)
+            end for
+        end function
+
+        private function QualityIds() as object
+            result = {}
+            content = m.top.findNode("checkList").content
+            for each checkbox in content.getChildren(-1, 0)
+                result[checkbox.id] = true
+            end for
+            return result
+        end function
+
+    end class
+
+end namespace

@@ -58,6 +58,12 @@ function Initialize()
     m.seekToPercent = invalid
 
     m.errorDialogNode = invalid
+    m.statsForNerds = invalid
+    m.qualitySelector = invalid
+    m.statsEnabled = false
+    m.captionsEnabled = false
+    m.bookmarkAvailable = false
+    m.bookmarked = false
     m.ignoreNextFinished = false ' a retry replay -> swallow the next "finished" edge
     m.videoPlayedSuccessfully = false ' true once the stream has actually played (gates error-retry)
     m.healCount = 0 ' INV-D1 heals this content (telemetry stops at INV_D1_TELEMETRY_CAP; total goes out in the close summary)
@@ -68,7 +74,7 @@ function Initialize()
     m.firstFrameSeen = false
     m.showFullScreenHint = false
     m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Bar
-    m.focusedButton = 0
+    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlayPause
     m.armedTimerId = TransportController.Timer.None ' which module timer the single transportTimer holds
     m.lastCommitSeq = 0
     m.lastFinishSeq = 0
@@ -168,6 +174,18 @@ function OnNodeReady()
     m.top.ObserveField("thumbnailTiles", FuncName(OnThumbnailTiles))
     ' an external resume/play (the linked phone via Lounge) under an active transport must take over.
     m.top.ObserveField("control", FuncName(OnControlChange))
+    m.top.ObserveField("globalCaptionMode", FuncName(OnCaptionModeChange))
+    if m.videoQueue <> invalid
+        m.videoQueue.ObserveFieldScoped("hasPrevious", FuncName(OnQueueAvailabilityChange))
+        m.videoQueue.ObserveFieldScoped("hasNext", FuncName(OnQueueAvailabilityChange))
+    end if
+    if m.bookmarksService <> invalid
+        m.bookmarksService.ObserveFieldScoped("contentChange", FuncName(OnBookmarksChange))
+    end if
+
+    SyncCaptionState()
+    SyncBookmarkState()
+    SetupStatsForNerds()
 
     ' a player that starts minimized shows the PiP hint (1s after the shrink settles, auto-hides after 5s).
     m.showFullScreenHint = not m.container.fullscreen
@@ -523,7 +541,7 @@ end function
 ' don't own (Play/Rev/Fwd/Replay/Back) so those fall through to the transport / play-pause / close.
 function HandleButtonsKey(key as string) as boolean
     if key = RemoteKeys.Left or key = RemoteKeys.Right
-        newIndex = PlayerCoordinatorLogic.NextButtonIndex(m.focusedButton, key, m.buttonRow.buttonCount)
+        newIndex = PlayerCoordinatorLogic.NextEnabledButtonIndex(m.focusedButton, key, m.buttonRow.buttonCount, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable)
         if newIndex = m.focusedButton
             ' clamped at the row's end: pulse the focused button so the press visibly lands somewhere.
             m.buttonRow.nudge = true
@@ -541,8 +559,45 @@ end function
 
 ' Run the action for the focused button.
 function ActivateButton(index as integer) as void
-    if index = PlayerCoordinatorLogic.PlayerButton.PlayPause
+    if not IsPlayerButtonEnabled(index)
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    if index = PlayerCoordinatorLogic.PlayerButton.Previous
+        HideChromeNow()
+        m.videoQueue.previous = true
+        return
+    else if index = PlayerCoordinatorLogic.PlayerButton.SkipBack
+        if m.transport.SeekBy(-TransportController.SKIP_10_SECONDS_MS)
+            ApplyTransport()
+        else
+            m.buttonRow.nudge = true
+        end if
+        ArmAutoHide()
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlayPause
         TogglePlayPause()
+    else if index = PlayerCoordinatorLogic.PlayerButton.SkipForward
+        if m.transport.SeekBy(TransportController.SKIP_10_SECONDS_MS)
+            ApplyTransport()
+        else
+            m.buttonRow.nudge = true
+        end if
+        ArmAutoHide()
+    else if index = PlayerCoordinatorLogic.PlayerButton.NextVideo
+        HideChromeNow()
+        m.videoQueue.next = true
+        return
+    else if index = PlayerCoordinatorLogic.PlayerButton.Quality
+        OpenQualitySelector()
+        return
+    else if index = PlayerCoordinatorLogic.PlayerButton.Captions
+        ToggleCaptions()
+    else if index = PlayerCoordinatorLogic.PlayerButton.Stats
+        ToggleStatsForNerds()
+    else if index = PlayerCoordinatorLogic.PlayerButton.Bookmark
+        ToggleBookmark()
     else if index = PlayerCoordinatorLogic.PlayerButton.Minimize
         MinimizeReset()
         VideoQueueUtils.ToggleVideoPictureInPicture(m.videoQueue)
@@ -554,12 +609,277 @@ end function
 ' holds focus; the trackbar's cursor grows while the BAR tier holds focus. Both are gated on the chrome being
 ' up, so nothing reads as focused while the chrome is hidden.
 function SyncFocus() as void
+    if not IsPlayerButtonEnabled(m.focusedButton)
+        m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlayPause
+    end if
     chromeShown = (m.chromeMode = ChromeMode.Shown or m.chromeMode = ChromeMode.FadingIn)
     m.buttonRow.transportMode = m.transport.transportMode
     m.buttonRow.rowFocused = chromeShown and (m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons)
     m.buttonRow.focusedIndex = m.focusedButton
     m.buttonRow.playing = (m.top.state = VideoState.Playing)
+    m.buttonRow.previousEnabled = HasPreviousQueueItem()
+    m.buttonRow.skipEnabled = not m.transport.isLive
+    m.buttonRow.nextEnabled = HasNextQueueItem()
+    m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(CurrentQualityPreference())
+    m.buttonRow.captionsEnabled = m.captionsEnabled
+    m.buttonRow.statsEnabled = m.statsEnabled
+    m.buttonRow.bookmarkAvailable = m.bookmarkAvailable
+    m.buttonRow.bookmarked = m.bookmarked
     m.trickPlayBar.focused = chromeShown and (m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Bar)
+end function
+
+function HasPreviousQueueItem() as boolean
+    if m.videoQueue = invalid
+        return false
+    end if
+    return m.videoQueue.hasPrevious = true
+end function
+
+function HasNextQueueItem() as boolean
+    if m.videoQueue = invalid
+        return false
+    end if
+    return m.videoQueue.hasNext = true
+end function
+
+function IsPlayerButtonEnabled(index as integer) as boolean
+    return PlayerCoordinatorLogic.ButtonEnabled(index, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable)
+end function
+
+function OnQueueAvailabilityChange(_event as object) as void
+    if m.onCloseCalled <> true
+        SyncFocus()
+    end if
+end function
+
+'===============================================================================
+' QUALITY — the upstream selector hosted as a player-owned modal. Saving changes the preference used when
+' the next VideoContentJob resolves; the current stream is deliberately left intact so opening the selector
+' never loses position, queue, pause, auth, or SponsorBlock state.
+'===============================================================================
+function CurrentQualityPreference() as string
+    if m.top.preferences = invalid
+        return "auto"
+    end if
+    value = ValidString(m.top.preferences["playback.preferred_quality"])
+    if StringUtils.IsNullOrEmpty(value)
+        return "auto"
+    end if
+    return value
+end function
+
+function OpenQualitySelector() as void
+    if m.qualitySelector <> invalid
+        return
+    end if
+
+    selector = CreateObject("roSGNode", "QualitySelector")
+    if selector = invalid
+        LogError("Failed to create QualitySelector")
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    selector.embedded = true
+    m.top.appendChild(selector)
+    selector@.BindNode()
+    selector.value = CurrentQualityPreference()
+    selector.ObserveFieldScoped("save", FuncName(OnQualitySelectorSave))
+    selector.ObserveFieldScoped("closed", FuncName(OnQualitySelectorClosed))
+    m.qualitySelector = selector
+
+    HideChromeNow()
+    NodeSetFocus(selector, true)
+end function
+
+function OnQualitySelectorSave(event as object) as void
+    selector = event.GetRoSGNode()
+    if m.qualitySelector = invalid or selector = invalid or not selector.IsSameNode(m.qualitySelector)
+        return
+    end if
+
+    value = ValidString(selector.value)
+    if StringUtils.IsNullOrEmpty(value)
+        value = "auto"
+    end if
+    if m.top.preferences <> invalid
+        m.top.preferences["playback.preferred_quality"] = value
+    end if
+    m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(value)
+end function
+
+function OnQualitySelectorClosed(event as object) as void
+    selector = event.GetRoSGNode()
+    if m.qualitySelector = invalid or selector = invalid or not selector.IsSameNode(m.qualitySelector)
+        return
+    end if
+
+    RemoveQualitySelector()
+    if m.onCloseCalled = true
+        return
+    end if
+
+    NodeSetFocus(m.top, true)
+    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
+    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.Quality
+    ShowChrome(true)
+end function
+
+function RemoveQualitySelector() as void
+    selector = m.qualitySelector
+    if selector = invalid
+        return
+    end if
+
+    selector.UnobserveFieldScoped("save")
+    selector.UnobserveFieldScoped("closed")
+    parent = selector.GetParent()
+    if parent <> invalid
+        parent.RemoveChild(selector)
+    end if
+    m.qualitySelector = invalid
+end function
+
+'===============================================================================
+' CAPTIONS + BOOKMARK — thin coordinator actions over the Video and BookmarksService state. Captions use the
+' global mode exclusively; suppressCaptions remains the independent PiP render-refresh mechanism.
+'===============================================================================
+function OnCaptionModeChange(_event as object) as void
+    if m.onCloseCalled <> true
+        SyncCaptionState()
+    end if
+end function
+
+function SyncCaptionState() as void
+    m.captionsEnabled = (ValidString(m.top.globalCaptionMode) <> "Off")
+    if m.buttonRow <> invalid
+        m.buttonRow.captionsEnabled = m.captionsEnabled
+    end if
+end function
+
+function ToggleCaptions() as void
+    if ValidString(m.top.globalCaptionMode) = "Off"
+        m.top.globalCaptionMode = "On"
+    else
+        m.top.globalCaptionMode = "Off"
+    end if
+    ' Keep the projection deterministic even if the device defers its field notification.
+    SyncCaptionState()
+    ArmAutoHide()
+end function
+
+function CurrentVideoId() as string
+    content = m.top.content
+    if content = invalid or not content.hasField("videoId")
+        return ""
+    end if
+    return ValidString(content.videoId)
+end function
+
+function CanBookmarkCurrentVideo() as boolean
+    return m.bookmarksService <> invalid and m.bookmarksService.content <> invalid and not StringUtils.IsNullOrEmpty(CurrentVideoId())
+end function
+
+function OnBookmarksChange(_event as object) as void
+    if m.onCloseCalled <> true
+        SyncBookmarkState()
+    end if
+end function
+
+function SyncBookmarkState() as void
+    m.bookmarkAvailable = CanBookmarkCurrentVideo()
+    m.bookmarked = false
+    if m.bookmarkAvailable
+        m.bookmarked = (m.bookmarksService.content.findNode(CurrentVideoId()) <> invalid)
+    end if
+    if m.buttonRow <> invalid
+        SyncFocus()
+    end if
+end function
+
+function ToggleBookmark() as void
+    if not CanBookmarkCurrentVideo()
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    videoId = CurrentVideoId()
+    if m.bookmarksService.content.findNode(videoId) <> invalid
+        m.bookmarksService@.RemoveBookmark(videoId)
+    else
+        m.bookmarksService@.AddVideoBookmark(videoId, Tr(Locale.Feed.Videos))
+    end if
+    ' contentChange is always-notify, but also sync here so the button flips in the same activation turn.
+    SyncBookmarkState()
+    ArmAutoHide()
+end function
+
+'===============================================================================
+' STATS FOR NERDS — persisted preference + passive fullscreen overlay. The overlay sits outside Chrome so
+' it remains visible when the HUD auto-hides, and owns its own fullscreen/observer gating.
+'===============================================================================
+function SetupStatsForNerds() as void
+    enabled = false
+    if m.top.preferences <> invalid
+        enabled = (m.top.preferences["playback.stats_for_nerds"] = true)
+    end if
+    SetStatsForNerdsEnabled(enabled)
+end function
+
+function ToggleStatsForNerds() as void
+    enabled = not m.statsEnabled
+    if m.top.preferences <> invalid
+        m.top.preferences["playback.stats_for_nerds"] = enabled
+    end if
+    SetStatsForNerdsEnabled(enabled)
+    ArmAutoHide()
+end function
+
+function SetStatsForNerdsEnabled(enabled as boolean) as void
+    m.statsEnabled = enabled
+    if enabled
+        EnsureStatsForNerds()
+    else
+        RemoveStatsForNerds()
+    end if
+    if m.buttonRow <> invalid
+        m.buttonRow.statsEnabled = enabled
+    end if
+end function
+
+function EnsureStatsForNerds() as void
+    if m.statsForNerds <> invalid
+        return
+    end if
+
+    stats = CreateObject("roSGNode", "StatsForNerds")
+    if stats = invalid
+        LogError("Failed to create StatsForNerds")
+        m.statsEnabled = false
+        return
+    end if
+    stats.video = m.top
+    m.top.appendChild(stats)
+    m.statsForNerds = stats
+end function
+
+function RemoveStatsForNerds() as void
+    stats = m.statsForNerds
+    if stats = invalid
+        return
+    end if
+
+    stats.visible = false
+    if stats.hasField("dispose")
+        stats.dispose = true
+    end if
+    parent = stats.getParent()
+    if parent <> invalid
+        parent.removeChild(stats)
+    end if
+    m.statsForNerds = invalid
 end function
 
 '===============================================================================
@@ -1123,6 +1443,7 @@ function StartVideoContentJob(videoContentNode as object)
     m.top.content.ObserveField("title", FuncName(OnContentMetaChange))
     m.top.content.ObserveField("secondaryTitle", FuncName(OnContentMetaChange))
     UpdateOverlayMeta()
+    SyncBookmarkState()
 
     input = {
         content: videoContentNode
@@ -1575,7 +1896,16 @@ function OnClose() as void
     m.top.unobserveField("duration")
     m.top.unobserveField("thumbnailTiles")
     m.top.unobserveField("control")
+    m.top.unobserveField("globalCaptionMode")
     m.top.unobserveField("close")
+    if m.videoQueue <> invalid
+        m.videoQueue.unobserveFieldScoped("hasPrevious")
+        m.videoQueue.unobserveFieldScoped("hasNext")
+    end if
+    if m.bookmarksService <> invalid
+        m.bookmarksService.unobserveFieldScoped("contentChange")
+    end if
+    RemoveQualitySelector()
     content = m.top.content
     if content <> invalid
         content.unobserveField("title")
@@ -1615,6 +1945,7 @@ function OnClose() as void
         m.sponsorblock.Dispose()
         m.sponsorblock = invalid
     end if
+    RemoveStatsForNerds()
     DismissErrorDialog()
 
     parent = m.top.getParent()

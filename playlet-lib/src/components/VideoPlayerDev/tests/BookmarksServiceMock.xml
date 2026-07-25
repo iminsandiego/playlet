@@ -1,0 +1,13 @@
+<component name="BookmarksServiceMock" extends="Node">
+    <interface>
+        <field id="content" type="node" />
+        <field id="contentChange" type="boolean" alwaysNotify="true" />
+        <field id="addCount" type="integer" />
+        <field id="removeCount" type="integer" />
+        <function name="AddVideoBookmark" />
+        <function name="RemoveBookmark" />
+    </interface>
+    <children>
+        <ContentNode id="BookmarkContent" />
+    </children>
+</component>

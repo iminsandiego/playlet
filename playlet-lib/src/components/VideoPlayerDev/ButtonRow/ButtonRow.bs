@@ -9,9 +9,17 @@ const SCREEN_CENTER_X = 640
 const TRACKBAR_RIGHT_X = 1212
 
 function Init()
-    ' Focus order MUST match PlayerCoordinatorLogic.PlayerButton (playPause=0, minimize=1).
+    ' Focus order MUST match PlayerCoordinatorLogic.PlayerButton.
     m.buttons = [
+        m.top.findNode("PreviousButton")
+        m.top.findNode("SkipBackButton")
         m.top.findNode("PlayPauseButton")
+        m.top.findNode("SkipForwardButton")
+        m.top.findNode("NextButton")
+        m.top.findNode("QualityButton")
+        m.top.findNode("CaptionsButton")
+        m.top.findNode("StatsButton")
+        m.top.findNode("BookmarkButton")
         m.top.findNode("MinimizeButton")
     ]
     m.centerCluster = m.top.findNode("CenterCluster")
@@ -19,7 +27,7 @@ function Init()
     LayoutClusters()
     m.top.buttonCount = m.buttons.Count() ' coordinator reads this to clamp focus
 
-    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing"]
+    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "skipEnabled", "nextEnabled", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
         m.top.ObserveField(field, FuncName(Repaint))
     end for
     m.top.ObserveField("nudge", FuncName(OnNudge))
@@ -44,8 +52,11 @@ function LayoutClusters() as void
 end function
 
 function LayoutButtons(cluster as object) as void
+    x = 0
     for i = 0 to cluster.getChildCount() - 1
-        cluster.getChild(i).translation = [i * (BUTTON_WIDTH + BUTTON_SPACING), 0]
+        button = cluster.getChild(i)
+        button.translation = [x, 0]
+        x += ButtonWidth(button) + BUTTON_SPACING
     end for
 end function
 
@@ -54,7 +65,21 @@ function ClusterWidth(cluster as object) as integer
     if n <= 0
         return 0
     end if
-    return n * BUTTON_WIDTH + (n - 1) * BUTTON_SPACING
+    width = (n - 1) * BUTTON_SPACING
+    for i = 0 to n - 1
+        width += ButtonWidth(cluster.getChild(i))
+    end for
+    return width
+end function
+
+function ButtonWidth(button as object) as integer
+    if button.hasField("buttonWidth")
+        width = ValidInt(button.buttonWidth)
+        if width > 0
+            return width
+        end if
+    end if
+    return BUTTON_WIDTH
 end function
 
 function Repaint() as void
@@ -62,7 +87,17 @@ function Repaint() as void
     ' fades the parent group, so visible=true with a hidden parent stays unpainted.
     m.top.visible = (m.top.transportMode = TransportController.Mode.Idle)
 
-    m.buttons[0].toggleState = not m.top.playing ' toggleState false = play icon, true = pause icon
+    m.buttons[0].disabled = not m.top.previousEnabled
+    m.buttons[1].disabled = not m.top.skipEnabled
+    m.buttons[2].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
+    m.buttons[3].disabled = not m.top.skipEnabled
+    m.buttons[4].disabled = not m.top.nextEnabled
+    m.buttons[6].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
+    m.buttons[6].active = m.top.captionsEnabled
+    m.buttons[7].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
+    m.buttons[7].active = m.top.statsEnabled
+    m.buttons[8].disabled = not m.top.bookmarkAvailable
+    m.buttons[8].active = m.top.bookmarked
 
     for i = 0 to m.buttons.Count() - 1
         m.buttons[i].focused = m.top.rowFocused and i = m.top.focusedIndex

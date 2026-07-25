@@ -1,0 +1,27 @@
+function Init()
+    m.top.content = m.top.findNode("BookmarkContent")
+end function
+
+function AddVideoBookmark(videoId as string, _groupName as string) as void
+    if m.top.content.findNode(videoId) <> invalid
+        return
+    end if
+    bookmark = CreateObject("roSGNode", "ContentNode")
+    bookmark.id = videoId
+    m.top.content.appendChild(bookmark)
+    m.top.addCount += 1
+    m.top.contentChange = true
+end function
+
+function RemoveBookmark(videoId as string) as void
+    bookmark = m.top.content.findNode(videoId)
+    if bookmark = invalid
+        return
+    end if
+    parent = bookmark.getParent()
+    if parent <> invalid
+        parent.removeChild(bookmark)
+    end if
+    m.top.removeCount += 1
+    m.top.contentChange = true
+end function

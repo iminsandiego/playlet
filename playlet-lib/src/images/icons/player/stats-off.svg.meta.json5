@@ -1,0 +1,11 @@
+{
+  inputHash: 'e7c78e03708121e39e5a38faee96f6e7',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/stats-off.png',
+      outputHash: 'b667cedd9ca48216f174b13c7a1143b9',
+      width: 64,
+      height: 64,
+    },
+  ],
+}

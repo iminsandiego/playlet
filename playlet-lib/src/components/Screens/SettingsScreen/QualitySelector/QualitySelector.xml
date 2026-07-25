@@ -2,9 +2,14 @@
     <interface>
         <field id="value" type="string" onChange="OnValueChange" />
         <field id="save" type="boolean" alwaysNotify="true" />
+        <!-- Player-hosted mode: the host appends this selector as an overlay and observes `closed` to remove
+             it + restore player focus. `save` is pulsed before `closed`, so the host can read `value` first. -->
+        <field id="embedded" type="boolean" value="false" />
+        <field id="closed" type="boolean" alwaysNotify="true" />
         <field id="appController" type="node" bind="/AppController" />
     </interface>
     <children>
+        <Timer id="embeddedCloseTimer" duration="0.01" repeat="false" />
         <Rectangle
             width="1280"
             height="720"
@@ -38,13 +43,13 @@
                 </ContentNode>
             </CheckList>
 
-            <ButtonEx
+            <QualitySelectorActionButton
                 id="saveButton"
                 iconVisible="false"
                 text="Save"
                 padding="[30,30]"
                 translation="[340,555]" />
-            <ButtonEx
+            <QualitySelectorActionButton
                 id="closeButton"
                 iconVisible="false"
                 text="Close"

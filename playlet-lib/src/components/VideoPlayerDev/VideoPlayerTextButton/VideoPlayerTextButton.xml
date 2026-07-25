@@ -1,0 +1,37 @@
+<component name="VideoPlayerTextButton" extends="Group">
+    <!-- Compact text companion to VideoPlayerButton. It uses the same virtual-focus/disabled/nudge contract,
+         but exposes buttonWidth so ButtonRow can account for its wider quality label. -->
+    <interface>
+        <field id="buttonWidth" type="integer" value="64" />
+        <field id="text" type="string" alias="label.text" />
+
+        <field id="backgroundColor" type="color" value="#3C3C3C" />
+        <field id="focusedBackgroundColor" type="color" value="#DDDDDD" />
+        <field id="disabledBackgroundColor" type="color" value="#292929" />
+        <field id="textColor" type="color" value="#DDDDDD" />
+        <field id="focusedTextColor" type="color" value="#262626" />
+        <field id="activeTextColor" type="color" value="#FF1C30" />
+        <field id="focusedActiveTextColor" type="color" value="#B00014" />
+        <field id="disabledTextColor" type="color" value="#707070" />
+
+        <field id="focused" type="boolean" value="false" />
+        <field id="active" type="boolean" value="false" />
+        <field id="disabled" type="boolean" value="false" />
+        <field id="nudge" type="boolean" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Group id="anchor">
+            <Rectangle id="background" width="64" height="42" color="#3C3C3C">
+                <Label id="label" width="64" height="42" horizAlign="center" vertAlign="center">
+                    <Font role="font" uri="font:SmallBoldSystemFont" size="16" />
+                </Label>
+            </Rectangle>
+        </Group>
+        <Animation id="nudgeAnim" optional="true" duration="0.15">
+            <Vector2DFieldInterpolator id="nudgeScale"
+                key="[ 0.0, 0.5, 1.0 ]"
+                keyValue="[ [ 1.0, 1.0 ], [ 1.05, 1.05 ], [ 1.0, 1.0 ] ]"
+                fieldToInterp="anchor.scale" />
+        </Animation>
+    </children>
+</component>

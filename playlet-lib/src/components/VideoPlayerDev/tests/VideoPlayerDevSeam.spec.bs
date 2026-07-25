@@ -403,13 +403,16 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause focused
             snap = m.Snap()
             m.assertTrue(snap.chromeShown)
-            m.assertEqual(snap.focusedButton, 0)
-            ' highlight minimize, drop to the bar, come back up: still minimize.
+            m.assertEqual(snap.focusedButton, PlayerCoordinatorLogic.PlayerButton.PlayPause)
+            ' highlight Stats, drop to the bar, come back up: still Stats.
             m.top.callFunc("TestKey", RemoteKeys.Right, true)
-            m.assertEqual(m.Snap().focusedButton, 1)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
             m.top.callFunc("TestKey", RemoteKeys.Down, true)
             m.top.callFunc("TestKey", RemoteKeys.Up, true)
-            m.assertEqual(m.Snap().focusedButton, 1, "the highlight survives the round-trip")
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats, "the highlight survives the round-trip")
             ' hide the chrome (scrub from the bar tier, then commit) -> the NEXT reveal starts at play/pause.
             m.top.callFunc("TestKey", RemoteKeys.Down, true)
             m.top.callFunc("TestKey", RemoteKeys.Left, true)
@@ -418,7 +421,7 @@ namespace Tests
             m.assertFalse(m.Snap().chromeShown)
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' fresh reveal -> bar tier
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier
-            m.assertEqual(m.Snap().focusedButton, 0, "a fresh reveal resets the highlight")
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.PlayPause, "a fresh reveal resets the highlight")
         end function
 
         ' Up at the top tier (the buttons) has nowhere to go; the press must still visibly land — it pulses
@@ -442,10 +445,10 @@ namespace Tests
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier (default)
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' play/pause -> minimize
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' play/pause -> skip forward
             m.top.callFunc("TestKey", RemoteKeys.Down, true) ' buttons -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons
-            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' minimize -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' skip forward -> play/pause
             m.assertEqual(m.Snap().nudgeCount, 0, "every press moved focus; none may pulse")
         end function
 
@@ -453,14 +456,20 @@ namespace Tests
         @it("Left/Right clamped at the row ends nudge the focused button")
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier (default)
-            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause (leftmost)
-            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' clamped at the left end
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' -> skip back (Previous is disabled)
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' clamped at the first enabled control
             m.assertEqual(m.Snap().nudgeCount, 1)
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> minimize (rightmost)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skips disabled Next -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Captions
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skips disabled Bookmark -> Minimize
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' clamped at the right end
             snap = m.Snap()
             m.assertEqual(snap.nudgeCount, 2)
-            m.assertEqual(snap.focusedButton, 1, "the clamp held the highlight at the end")
+            m.assertEqual(snap.focusedButton, PlayerCoordinatorLogic.PlayerButton.Minimize, "the clamp held the highlight at the end")
         end function
 
         ' Down at the bar tier (the bottom, and the default on reveal) is a no-op: consumed, no nudge.
@@ -515,12 +524,254 @@ namespace Tests
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier (default)
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight minimize
-            m.assertEqual(m.Snap().focusedButton, 1)
-            m.top.callFunc("TestKey", RemoteKeys.Play, true) ' must pause, not minimize
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Quality (disabled Next is skipped)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Captions
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Stats
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
+            m.top.callFunc("TestKey", RemoteKeys.Play, true) ' must pause, not toggle Stats
             snap = m.Snap()
             m.assertEqual(snap.control, VideoControl.Pause, "Play paused the (playing) video")
-            m.assertEqual(snap.focusedButton, 1, "the highlight is untouched")
+            m.assertEqual(snap.focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats, "the highlight is untouched")
+            m.assertFalse(snap.statsEnabled, "Play did not activate the highlighted Stats button")
+        end function
+
+        @it("Stats button toggles the persisted overlay without changing playback or focus")
+        function _()
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons, play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next is skipped -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Captions
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
+            before = m.Snap()
+            m.assertFalse(before.statsEnabled)
+            m.assertFalse(before.statsOverlayPresent)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            enabled = m.Snap()
+            m.assertTrue(enabled.statsEnabled)
+            m.assertTrue(enabled.statsOverlayPresent)
+            m.assertEqual(enabled.control, before.control, "Stats does not alter playback")
+            m.assertEqual(enabled.focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
+            m.assertTrue(m.top.preferences["playback.stats_for_nerds"], "the toggle is persisted")
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            disabled = m.Snap()
+            m.assertFalse(disabled.statsEnabled)
+            m.assertFalse(disabled.statsOverlayPresent)
+            m.assertFalse(m.top.preferences["playback.stats_for_nerds"])
+        end function
+
+        @it("Quality opens the full selector, persists its value for future videos, and restores button focus")
+        function _()
+            initial = m.Snap()
+            m.assertEqual(initial.qualityPreference, "auto")
+            m.assertEqual(initial.qualityLabel, "Auto")
+            m.assertFalse(initial.qualitySelectorPresent)
+
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Quality
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            open = m.Snap()
+            m.assertTrue(open.qualitySelectorPresent)
+            m.assertFalse(open.chromeShown, "the modal owns the screen while open")
+
+            m.top.callFunc("TestSaveQuality", "1080p")
+            saved = m.Snap()
+            m.assertEqual(saved.qualityPreference, "1080p")
+            m.assertEqual(saved.qualityLabel, "1080p")
+
+            m.top.callFunc("TestCloseQuality")
+            closed = m.Snap()
+            m.assertFalse(closed.qualitySelectorPresent)
+            m.assertTrue(closed.chromeShown)
+            m.assertEqual(closed.focusTarget, PlayerCoordinatorLogic.FocusTarget.Buttons)
+            m.assertEqual(closed.focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality)
+        end function
+
+        @it("CC mirrors every non-Off global mode and toggles only Off/On without touching PiP suppression")
+        function _()
+            initial = m.Snap()
+            m.assertEqual(initial.globalCaptionMode, "Off")
+            m.assertFalse(initial.captionsEnabled)
+            m.assertFalse(initial.captionsActive)
+            m.assertFalse(initial.suppressCaptions)
+
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> CC
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Captions)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            enabled = m.Snap()
+            m.assertEqual(enabled.globalCaptionMode, "On")
+            m.assertTrue(enabled.captionsEnabled)
+            m.assertTrue(enabled.captionsActive)
+            m.assertFalse(enabled.suppressCaptions, "the CC action never repurposes PiP suppression")
+
+            m.top.globalCaptionMode = "Instant replay"
+            conditional = m.Snap()
+            m.assertTrue(conditional.captionsEnabled)
+            m.assertTrue(conditional.captionsActive)
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().globalCaptionMode, "Off", "any active global mode toggles to Off")
+
+            m.top.globalCaptionMode = "When mute"
+            m.assertTrue(m.Snap().captionsEnabled, "When mute is also an active global caption mode")
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().globalCaptionMode, "Off")
+        end function
+
+        @it("Bookmark disables without a videoId, observes external changes, and toggles Add/Remove in place")
+        function _()
+            empty = m.Snap()
+            m.assertFalse(empty.bookmarkAvailable)
+            m.assertTrue(empty.bookmarkDisabled)
+
+            m.top.callFunc("TestSetVideoId", "bookmark-video")
+            available = m.Snap()
+            m.assertTrue(available.bookmarkAvailable)
+            m.assertFalse(available.bookmarkDisabled)
+            m.assertFalse(available.bookmarked)
+
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> CC
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Bookmark
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Bookmark)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            added = m.Snap()
+            m.assertTrue(added.bookmarked)
+            m.assertTrue(added.bookmarkActive)
+            m.assertEqual(added.bookmarkAddCount, 1)
+            m.assertEqual(added.bookmarkRemoveCount, 0)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            removed = m.Snap()
+            m.assertFalse(removed.bookmarked)
+            m.assertFalse(removed.bookmarkActive)
+            m.assertEqual(removed.bookmarkAddCount, 1)
+            m.assertEqual(removed.bookmarkRemoveCount, 1)
+
+            m.top.callFunc("TestAddBookmarkExternally", "bookmark-video")
+            m.assertTrue(m.Snap().bookmarked, "contentChange resynchronizes external bookmark writes")
+            m.top.callFunc("TestSetVideoId", "different-video")
+            m.assertFalse(m.Snap().bookmarked, "the active state follows the current content videoId")
+        end function
+
+        @it("queue ends are dimmed, skipped by virtual focus, and queue actions pulse exactly once")
+        function _()
+            defaults = m.Snap()
+            m.assertTrue(defaults.previousDisabled)
+            m.assertTrue(defaults.nextDisabled)
+            m.assertFalse(defaults.skipBackDisabled)
+            m.assertFalse(defaults.skipForwardDisabled)
+
+            m.top.videoQueue.hasPrevious = true
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' -> skip back
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' -> Previous (now enabled)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Previous)
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().queuePreviousCount, 1)
+            m.assertEqual(m.Snap().queueNextCount, 0)
+
+            ' The mock records the queue pulse without replacing itself; drive the opposite end independently.
+            m.top.videoQueue.hasPrevious = false
+            m.top.videoQueue.hasNext = true
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Next (now enabled)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.NextVideo)
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().queuePreviousCount, 1)
+            m.assertEqual(m.Snap().queueNextCount, 1)
+        end function
+
+        @it("a queue capability race resets a disabled highlight and cannot activate the stale action")
+        function _()
+            m.top.videoQueue.hasNext = true
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.NextVideo)
+
+            m.top.videoQueue.hasNext = false
+            afterDisable = m.Snap()
+            m.assertTrue(afterDisable.nextDisabled)
+            m.assertEqual(afterDisable.focusedButton, PlayerCoordinatorLogic.PlayerButton.PlayPause)
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().queueNextCount, 0, "the stale Next action never fired")
+        end function
+
+        @it("dedicated VOD skips seek +/-10s, accumulate rapid presses, and keep the renderer idle")
+        function _()
+            m.top.duration = 120
+            m.top.position = 60
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' skip back
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            back = m.Snap()
+            m.assertEqual(back.seek, 50.0)
+            m.assertEqual(back.transportMode, TransportController.Mode.Idle)
+            m.assertFalse(back.bifVisible)
+
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true) ' 50 -> 60
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true) ' 60 -> 70 before a device position edge
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true) ' 70 -> 80
+            ahead = m.Snap()
+            m.assertEqual(ahead.seek, 80.0, "rapid presses accumulate from the optimistic target")
+            m.assertEqual(ahead.transportMode, TransportController.Mode.Idle)
+            m.assertFalse(ahead.bifVisible)
+            m.assertEqual(m.top.state, VideoState.Playing)
+        end function
+
+        @it("a dedicated skip issued while paused restores the pause after Roku auto-resumes the seek")
+        function _()
+            ' Use a distinct duration from the preceding shared-node test so the inert mock emits OnDuration.
+            m.top.duration = 121
+            m.top.position = 60
+            m.top.callFunc("TestSetState", VideoState.Paused)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skip forward
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.Snap().seek, 70.0)
+
+            m.top.callFunc("TestSetControl", VideoControl.None)
+            m.top.callFunc("TestSetState", VideoState.Playing)
+            m.assertEqual(m.Snap().control, VideoControl.Pause)
+        end function
+
+        @it("fixed skips are dimmed and skipped on live playback")
+        function _()
+            m.top.callFunc("TestSetLive", 43200000)
+            live = m.Snap()
+            m.assertTrue(live.skipBackDisabled)
+            m.assertTrue(live.skipForwardDisabled)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality, "live skips disabled Next and fixed skip")
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Captions)
         end function
 
         ' The coordinator twin of the brain's unmodeled-axis meta-test: every m.* field on the coordinator must
@@ -530,7 +781,7 @@ namespace Tests
         function _()
             classified = {}
             ' bound deps (AutoBind interface aliases) + the test stub's own copies.
-            for each name in ["container", "jobQueue", "preferences", "invidious", "videoQueue", "loungeService", "notifications", "appController", "webServer", "innertube"]
+            for each name in ["container", "jobQueue", "preferences", "invidious", "videoQueue", "loungeService", "bookmarksService", "notifications", "appController", "webServer", "innertube"]
                 classified[name] = "dep"
             end for
             ' controllers (plain .bs class instances).
@@ -538,7 +789,7 @@ namespace Tests
                 classified[name] = "controller"
             end for
             ' cached child nodes / timers / animations / reusable helpers (structure, not state).
-            for each name in ["chrome", "titleLabel", "secondaryTitleLabel", "clock", "bifDisplay", "trickPlayBar", "spinner", "largePause", "buttonRow", "fullScreenHint", "autoHide", "transportTimer", "liveBadgeHold", "liveEdgeClock", "fullScreenHintTimer", "chromeFadeIn", "chromeFadeOut", "minimize", "nowDateTime"]
+            for each name in ["chrome", "titleLabel", "secondaryTitleLabel", "clock", "bifDisplay", "trickPlayBar", "spinner", "largePause", "buttonRow", "fullScreenHint", "autoHide", "transportTimer", "liveBadgeHold", "liveEdgeClock", "fullScreenHintTimer", "chromeFadeIn", "chromeFadeOut", "minimize", "nowDateTime", "statsForNerds", "qualitySelector"]
                 classified[name] = "node"
             end for
             ' in-flight job handles.
@@ -546,7 +797,7 @@ namespace Tests
                 classified[name] = "job"
             end for
             ' STATE AXES — discrete coordinator state; each needs its transitions covered by a seam test.
-            for each name in ["chromeMode", "focusTarget", "focusedButton", "armedTimerId"]
+            for each name in ["chromeMode", "focusTarget", "focusedButton", "armedTimerId", "statsEnabled", "captionsEnabled", "bookmarkAvailable", "bookmarked"]
                 classified[name] = "axis"
             end for
             ' flags / scratch — one-shot latches and counters with a single consuming path.
@@ -602,6 +853,11 @@ namespace Tests
         @it("a closed player ignores container fullscreen flips (the PiP-toggle-after-close crash)")
         function _()
             container = m.top.container
+            bookmarksService = m.top.bookmarksService
+            m.top.callFunc("TestSetVideoId", "close-observer-video")
+            m.top.callFunc("TestAddBookmarkExternally", "close-observer-video")
+            m.assertTrue(m.Snap().bookmarked)
+            m.assertFalse(m.Snap().captionsEnabled)
             ' sanity: pre-close the observer is live — a minimize hides all player UI.
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal the chrome
             m.assertTrue(m.Snap().chromeShown)
@@ -622,7 +878,12 @@ namespace Tests
             m.top.duration = 99.0
             m.top.seek = 5.0
             m.top.thumbnailTiles = { x: [{ htiles: 1 }] }
+            m.top.globalCaptionMode = "On"
+            bookmarksService@.RemoveBookmark("close-observer-video")
             m.top.close = true
+            postClose = m.Snap()
+            m.assertFalse(postClose.captionsEnabled, "the closed player detached the global-caption observer")
+            m.assertTrue(postClose.bookmarked, "the closed player detached the bookmark-content observer")
             m.assertTrue(true, "no crash: the closed player ignored all post-close traffic")
         end function
 

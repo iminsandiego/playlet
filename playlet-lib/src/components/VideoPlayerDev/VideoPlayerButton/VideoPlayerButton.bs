@@ -1,8 +1,8 @@
 import "pkg:/source/utils/Types.bs"
 
-' Round icon button: a pure projection of its focused/toggleState input fields. No focus or key handling —
-' the coordinator owns both via virtual focus. Gaining focus (and the `nudge` pulse) plays a subtle scale
-' pulse so the eye finds the highlighted button.
+' Round icon button: a pure projection of its focused/active/toggleState input fields. No focus or key
+' handling — the coordinator owns both via virtual focus. Gaining focus (and the `nudge` pulse) plays a
+' subtle scale pulse so the eye finds the highlighted button.
 
 function Init()
     m.background = m.top.findNode("background")
@@ -14,6 +14,8 @@ function Init()
     m.anchor.scaleRotateCenter = [m.background.width / 2, m.background.height / 2]
 
     m.top.ObserveField("focused", FuncName(OnFocused))
+    m.top.ObserveField("active", FuncName(Repaint))
+    m.top.ObserveField("disabled", FuncName(Repaint))
     m.top.ObserveField("toggleState", FuncName(Repaint))
     m.top.ObserveField("nudge", FuncName(OnNudge))
     Repaint()
@@ -21,13 +23,15 @@ end function
 
 function OnFocused() as void
     Repaint()
-    if m.top.focused
+    if m.top.focused and not m.top.disabled
         Pulse()
     end if
 end function
 
 function OnNudge() as void
-    Pulse()
+    if not m.top.disabled
+        Pulse()
+    end if
 end function
 
 ' stop-then-start so a rapid second pulse restarts instead of being swallowed mid-flight.
@@ -37,13 +41,30 @@ function Pulse() as void
 end function
 
 function Repaint() as void
+    if m.top.disabled
+        m.background.blendColor = m.top.disabledBackgroundColor
+        m.icon.blendColor = m.top.disabledIconColor
+        m.icon2.blendColor = m.top.disabledIconColor
+        m.icon.visible = m.top.toggleState
+        m.icon2.visible = not m.top.toggleState
+        return
+    end if
+
     focused = m.top.focused
     if focused
         m.background.blendColor = m.top.focusedBackgroundColor
-        iconColor = m.top.focusedIconColor
+        if m.top.active
+            iconColor = m.top.focusedActiveIconColor
+        else
+            iconColor = m.top.focusedIconColor
+        end if
     else
         m.background.blendColor = m.top.backgroundColor
-        iconColor = m.top.iconColor
+        if m.top.active
+            iconColor = m.top.activeIconColor
+        else
+            iconColor = m.top.iconColor
+        end if
     end if
     m.icon.blendColor = iconColor
     m.icon2.blendColor = iconColor

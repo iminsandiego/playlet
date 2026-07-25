@@ -47,8 +47,16 @@ namespace PlayerCoordinatorLogic
     ' The buttons in the row above the trackbar, in focus order (the index). The COUNT is owned by ButtonRow
     ' (m.buttons / its buttonCount field) — there is no separate count constant to keep in sync.
     enum PlayerButton
-        PlayPause = 0
-        Minimize = 1
+        Previous = 0
+        SkipBack = 1
+        PlayPause = 2
+        SkipForward = 3
+        NextVideo = 4
+        Quality = 5
+        Captions = 6
+        Stats = 7
+        Bookmark = 8
+        Minimize = 9
     end enum
 
     ' The two focus targets above/at the trackbar: the bar itself (Left/Right scrub, the cursor grows) and the
@@ -160,6 +168,52 @@ namespace PlayerCoordinatorLogic
             return ClampButtonIndex(current + 1, count)
         end if
         return ClampButtonIndex(current, count)
+    end function
+
+    ' Availability is a coordinator decision so virtual focus can skip disabled controls just as a real
+    ' SceneGraph focus chain would. Dedicated +/-10s controls are VOD-only; queue ends disable Previous/Next.
+    function ButtonEnabled(index as integer, hasPrevious as boolean, isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as boolean
+        if index = PlayerButton.Previous
+            return hasPrevious
+        else if index = PlayerButton.SkipBack or index = PlayerButton.SkipForward
+            return not isLive
+        else if index = PlayerButton.NextVideo
+            return hasNext
+        else if index = PlayerButton.Bookmark
+            return bookmarkAvailable
+        end if
+        return true
+    end function
+
+    ' Move one direction until an enabled button is found, clamping at the row edge. Disabled controls remain
+    ' visible (dimmed) but never become the standing virtual focus target.
+    function NextEnabledButtonIndex(current as integer, key as string, count as integer, hasPrevious as boolean, isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as integer
+        candidate = NextButtonIndex(current, key, count)
+        while candidate <> current
+            if ButtonEnabled(candidate, hasPrevious, isLive, hasNext, bookmarkAvailable)
+                return candidate
+            end if
+            nextCandidate = NextButtonIndex(candidate, key, count)
+            if nextCandidate = candidate
+                return current
+            end if
+            candidate = nextCandidate
+        end while
+        return current
+    end function
+
+    ' Compact standing label for the multi-quality preference. The selector retains the full comma-separated
+    ' value; the player button shows the highest-priority entry (and the familiar 4K label for 2160p).
+    function QualityLabel(value as dynamic) as string
+        quality = ValidString(value).Trim()
+        if quality = "" or quality = "auto"
+            return "Auto"
+        end if
+        quality = quality.Split(",")[0]
+        if quality = "2160p"
+            return "4K"
+        end if
+        return quality
     end function
 
     ' Move focus between the tiers: Down goes buttons -> bar; Up goes bar -> buttons. No wrap (the buttons are

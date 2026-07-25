@@ -1,0 +1,8 @@
+<component name="QualitySelectorTestHarness" extends="QualitySelector">
+    <!-- Test-only key router seam. Keeping this under tests/ avoids adding a test function to the production
+         selector interface merely to exercise the inherited OnKeyEvent contract. -->
+    <interface>
+        <function name="TestKey" />
+        <function name="TestCompleteClose" />
+    </interface>
+</component>

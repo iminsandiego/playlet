@@ -1,0 +1,11 @@
+{
+  inputHash: '87f2946c0ca263cdee0ac99090d125ec',
+  outputs: [
+    {
+      outputFilePath: 'images/icons/player/cc-on.png',
+      outputHash: '7a9eace36aae8df6a8e1cd7048d59c25',
+      width: 42,
+      height: 42,
+    },
+  ],
+}

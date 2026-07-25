@@ -239,6 +239,44 @@ namespace Tests
             m.assertEqual(PlayerCoordinatorLogic.NextButtonIndex(3, RemoteKeys.Right, 4), 3)
         end function
 
+        @it("skips disabled queue controls and VOD-only skips while preserving row order")
+        function _()
+            play = PlayerCoordinatorLogic.PlayerButton.PlayPause
+            quality = PlayerCoordinatorLogic.PlayerButton.Quality
+            previous = PlayerCoordinatorLogic.PlayerButton.Previous
+
+            ' VOD with a previous item: Play -> SkipBack -> Previous.
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 10, true, false, false, false), PlayerCoordinatorLogic.PlayerButton.SkipBack)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.SkipBack, RemoteKeys.Left, 10, true, false, false, false), previous)
+
+            ' Live at both queue ends with no video id: skips Next, both +/-10s controls, Previous, and Bookmark.
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 10, false, true, false, false), play)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 10, false, true, false, false), quality)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(quality, RemoteKeys.Left, 10, false, true, false, false), play)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.Stats, RemoteKeys.Right, 10, false, true, false, false), PlayerCoordinatorLogic.PlayerButton.Minimize)
+        end function
+
+        @it("the availability decision matches queue ends and live/VOD semantics")
+        function _()
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, false, false, true, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, true, false, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.SkipForward, false, false, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.SkipForward, false, true, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, true, false, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, false, true, true, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Captions, false, true, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, true, false, true, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, false, true, false, true))
+        end function
+
+        @it("summarizes the full quality preference for the compact button")
+        function _()
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel(invalid), "Auto")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("auto"), "Auto")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("2160p,1440p,1080p"), "4K")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("1080p,720p"), "1080p")
+        end function
+
         @it("Up/Down move focus between the bar and the buttons, no wrap")
         function _()
             buttons = PlayerCoordinatorLogic.FocusTarget.Buttons

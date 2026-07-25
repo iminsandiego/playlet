@@ -41,6 +41,8 @@ namespace TransportController
         Fwd = 4 ' VOD scan forward / live continuous forward preview
         Replay = 5 ' InstantReplay -20s
         Commit = 6 ' Select/OK or Play: seek-to-cursor + resume (when a transport is active)
+        SkipBack10 = 7 ' VOD one-shot -10s seek, preserving the current play/pause state
+        SkipAhead10 = 8 ' VOD one-shot +10s seek, preserving the current play/pause state
     end enum
 
     enum Control
@@ -90,6 +92,7 @@ namespace TransportController
     ' interval so short DVRs are unchanged. 4000 -> ~10.8s base on a 12h DVR -> L3 ~65s/tick.
     const LIVE_SCAN_BASE_DIVISOR = 4000
     const REPLAY_BACK_MS = 20000
+    const SKIP_10_SECONDS_MS = 10000
     ' A VOD commit landing within this of the duration means "watched to the end" -> finish (PlayNext/close),
     ' not a seek into the last instants (which just re-buffers and fights the device's EOF auto-resume).
     ' Matches the SponsorBlock finish rule (SkipTargetForSegment).
@@ -403,6 +406,14 @@ namespace TransportController
                 m.Replay()
                 return
             end if
+            if command = TransportController.Command.SkipBack10
+                m.SeekBy(-TransportController.SKIP_10_SECONDS_MS)
+                return
+            end if
+            if command = TransportController.Command.SkipAhead10
+                m.SeekBy(TransportController.SKIP_10_SECONDS_MS)
+                return
+            end if
             if m.isLive
                 ' a non-rewindable live stream (DVR window is just the buffer) takes no transport input.
                 if not m.CanRewindLive()
@@ -428,6 +439,38 @@ namespace TransportController
             else if command = TransportController.Command.Rev
                 m.EnterScan(-1)
             end if
+        end function
+
+        ' VOD-only one-shot relative seek for the dedicated -10/+10 controls. Unlike scrub/scan, this does not
+        ' enter a preview transport or change playback state: control=None lets a playing video keep playing and
+        ' lets the coordinator's existing re-pause-after-seek seam restore a paused video after Roku's implicit
+        ' seek resume. Buttons exist only in idle, so active transports reject the command instead of silently
+        ' changing their cursor/commit semantics. Live has its own moving-edge/DVR preview model and rejects this
+        ' fixed VOD seek; callers should use Left/Right/Rev/Fwd for live until the live button UX is specified.
+        function SeekBy(deltaMs as integer) as boolean
+            if not m.ready or m.isLive or m.transportMode <> TransportController.Mode.Idle
+                return false
+            end if
+            if m.durationMs <= 0 or deltaMs = 0
+                return false
+            end if
+
+            target = m.Clamp(m.positionMs + deltaMs, 0, m.durationMs)
+            if target = m.positionMs
+                return false
+            end if
+
+            ' A new explicit seek breaks rapid InstantReplay accumulation and clears its idle toast.
+            m.replayPending = false
+            m.replayTargetMs = 0
+            m.glyph = TransportController.Glyph.None
+            m.StopTimer(TransportController.Timer.ReplayToast)
+
+            ' Optimistic projection avoids an idle-bar snap-back while the seek is in flight (same as Commit).
+            m.positionMs = target
+            m.cursorMs = target
+            m.EmitIntent(TransportController.Control.None, true, target)
+            return true
         end function
 
         ' ------------------------------------------------------------------------------------------------
