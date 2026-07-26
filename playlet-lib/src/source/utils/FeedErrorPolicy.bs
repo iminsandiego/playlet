@@ -1,0 +1,19 @@
+namespace FeedErrorPolicy
+
+    ' Feed rows already retain their "(Failed to load)" state and onError signal. A modal is useful only for a
+    ' foreground, actionable failure; transient upstream 5xx responses and hidden-screen background work should
+    ' not interrupt whatever the user is currently watching.
+    function ShouldShowModal(error as string, isCancelled as boolean, screenVisible as boolean) as boolean
+        if isCancelled or not screenVisible
+            return false
+        end if
+        if error.Instr("StatusCode: 5") >= 0
+            return false
+        end if
+        if error.Instr("Reason:Internal server error") >= 0
+            return false
+        end if
+        return true
+    end function
+
+end namespace

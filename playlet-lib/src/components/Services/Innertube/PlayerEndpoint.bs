@@ -5,6 +5,7 @@ import "pkg:/components/Services/Innertube/OTFSegmentInfo.bs"
 import "pkg:/components/Services/Innertube/PostLiveDvrInfo.bs"
 import "pkg:/components/Services/Innertube/PoTokens.bs"
 import "pkg:/source/services/HttpClient.bs"
+import "pkg:/source/utils/ChapterMarkers.bs"
 import "pkg:/source/utils/ObjectUtils.bs"
 import "pkg:/source/utils/Types.bs"
 import "pkg:/source/utils/UrlUtils.bs"
@@ -162,6 +163,8 @@ namespace Innertube
         parsedResponse["adaptiveFormats"] = adaptiveFormats
         parsedResponse["formatStreams"] = formats
         parsedResponse["captions"] = ParseCaptions(payload)
+        parsedResponse["description"] = ValidString(videoDetails["shortDescription"])
+        parsedResponse["chapters"] = ChapterMarkers.FromPlayerResponse(payload, parsedResponse["description"], lengthSeconds * 1000)
 
         if not StringUtils.IsNullOrEmpty(videoDetails["title"])
             parsedResponse["title"] = videoDetails["title"]

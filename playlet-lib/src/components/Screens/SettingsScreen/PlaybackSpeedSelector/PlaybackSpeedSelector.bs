@@ -1,0 +1,101 @@
+import "pkg:/components/Navigation/Navigation.bs"
+import "pkg:/components/parts/AutoBind/OnNodeReadyNoOp.bs"
+import "pkg:/source/utils/FocusManagement.bs"
+import "pkg:/source/utils/RemoteKeys.bs"
+import "pkg:/source/utils/Types.bs"
+
+function Init()
+    m.speedList = m.top.findNode("speedList")
+    m.speedListContent = m.top.findNode("speedListContent")
+    m.embeddedCloseTimer = m.top.findNode("embeddedCloseTimer")
+
+    m.speedList.observeField("checkedItem", FuncName(OnCheckedItemChange))
+    m.embeddedCloseTimer.observeField("fire", FuncName(OnEmbeddedCloseTimer))
+end function
+
+function OnFocusChange() as void
+    if m.top.focus
+        FocusCheckedItem()
+        NodeSetFocus(m.speedList, true)
+    end if
+end function
+
+function OnKeyEvent(key as string, press as boolean) as boolean
+    if key = RemoteKeys.Back and press
+        Close()
+        return true
+    end if
+
+    return true
+end function
+
+function OnOptionsChange() as void
+    m.syncing = true
+    m.speedListContent.removeChildrenIndex(m.speedListContent.getChildCount(), 0)
+    for each option in m.top.options
+        node = CreateObject("roSGNode", "ContentNode")
+        node.title = Tr(option.displayText)
+        m.speedListContent.appendChild(node)
+    end for
+    SyncCheckedItem()
+    m.syncing = false
+end function
+
+function OnValueChange() as void
+    m.syncing = true
+    SyncCheckedItem()
+    m.syncing = false
+end function
+
+function SyncCheckedItem() as void
+    checkedItem = -1
+    for i = 0 to m.top.options.Count() - 1
+        if m.top.options[i].value = m.top.value
+            checkedItem = i
+            exit for
+        end if
+    end for
+    m.speedList.checkedItem = checkedItem
+    FocusCheckedItem()
+end function
+
+function FocusCheckedItem() as void
+    checkedItem = m.speedList.checkedItem
+    if checkedItem >= 0
+        m.speedList.jumpToItem = checkedItem
+    end if
+end function
+
+function OnCheckedItemChange() as void
+    if ValidBool(m.syncing)
+        return
+    end if
+
+    checkedItem = m.speedList.checkedItem
+    if checkedItem < 0 or checkedItem >= m.top.options.Count()
+        return
+    end if
+
+    m.top.value = m.top.options[checkedItem].value
+    m.top.save = true
+    Close()
+end function
+
+function Close() as void
+    focusedChild = m.top.focusedChild
+    if focusedChild <> invalid and not focusedChild.isSameNode(m.top)
+        NodeSetFocus(focusedChild, false)
+    end if
+    m.top.focus = false
+
+    if m.top.embedded
+        m.embeddedCloseTimer.control = "stop"
+        m.embeddedCloseTimer.control = "start"
+    else
+        m.appController@.PopScreen()
+    end if
+end function
+
+function OnEmbeddedCloseTimer() as void
+    m.top.closed = true
+end function

@@ -128,7 +128,9 @@ function RenderTiles(cursorMs as integer) as void
     SetCenterDecor(true)
 
     sheets = m.tileSet.tiles
-    centerTile = Int(cursorMs / m.intervalMs)
+    ' Transport steps are independent of the publisher's storyboard cadence. Pick the closest visual frame
+    ' to the exact cursor rather than quantizing the transport position to the storyboard grid.
+    centerTile = Int((cursorMs + Int(m.intervalMs / 2)) / m.intervalMs)
     for i = 0 to 4
         poster = m.tiles[i]
         slot = m.slots[i]

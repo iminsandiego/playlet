@@ -21,7 +21,7 @@
             height="640"
             translation="[250,40]"
             color="#242424">
-            <CheckList
+            <QualitySelectorCheckList
                 id="checkList"
                 vertFocusAnimationStyle="floatingFocus"
                 translation="[220,70]">
@@ -41,7 +41,7 @@
                     <!-- bs:disable-next-line LOCALE_MISSING_TRANSLATIONS -->
                     <ContentNode id="144p" title="144p" />
                 </ContentNode>
-            </CheckList>
+            </QualitySelectorCheckList>
 
             <QualitySelectorActionButton
                 id="saveButton"

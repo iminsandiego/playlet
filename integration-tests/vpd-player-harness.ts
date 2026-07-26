@@ -16,15 +16,13 @@ export const Mode = { idle: 0, scrub: 1, scan: 2, liveDvr: 3 } as const;
 export const Glyph = { none: 0, replay: 9 } as const;
 export const Button = {
     previous: 0,
-    skipBack: 1,
-    playPause: 2,
-    skipForward: 3,
-    next: 4,
-    quality: 5,
-    captions: 6,
-    stats: 7,
-    bookmark: 8,
-    minimize: 9,
+    playPause: 1,
+    next: 2,
+    playbackSettings: 3,
+    captions: 4,
+    stats: 5,
+    bookmark: 6,
+    minimize: 7,
 } as const;
 
 const j = (v: unknown) => JSON.stringify(v);
@@ -255,6 +253,15 @@ export async function launch(contentId: string, timeoutMs = 30_000): Promise<boo
     const start = Date.now();
     let sawContentLoad = false;
     while (Date.now() - start < timeoutMs) {
+        // Feed requests from the hidden Home screen can fail while a deep link is loading. Remove that unrelated
+        // dialog immediately instead of leaving it on the TV until the player becomes ready.
+        await dismissBlockingFeedDialog();
+        let dialogTitle: string | undefined;
+        try { dialogTitle = await field<string>('dialog.title'); } catch { dialogTitle = undefined; }
+        if (dialogTitle === 'Video load error') {
+            console.log(`  video load dialog appeared for ${contentId}; aborting this candidate`);
+            return false;
+        }
         let state: string | undefined;
         let loadedContentId: string | undefined;
         let launchSpinnerMode: number | undefined;

@@ -1,6 +1,7 @@
 import "pkg:/components/Dialog/DialogUtils.bs"
 import "pkg:/components/Services/Invidious/InvidiousService.bs"
 import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
+import "pkg:/source/utils/FeedErrorPolicy.bs"
 
 @job("VideoRowListRowContentJob")
 function ExecuteJob() as void
@@ -259,6 +260,14 @@ function HandleFeedLoadErrorDialog(error as object, isCancelled as boolean, rowL
         return
     end if
     if isCancelled
+        return
+    end if
+    screenVisible = true
+    if rowList.screen <> invalid
+        screenVisible = rowList.screen.visible
+    end if
+    if not FeedErrorPolicy.ShouldShowModal(error, isCancelled, screenVisible)
+        LogWarnNoTelemetry("Feed error kept inline; modal suppressed:", error)
         return
     end if
     DialogUtils.ShowDialogEx({
