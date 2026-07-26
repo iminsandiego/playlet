@@ -28,6 +28,15 @@ A thin coordinator over a pure-logic brain and projection-only renderers:
   hides itself, with no external hide call). The title/metadata labels and the shared `Clock` component live
   directly in a Group under Chrome (the clock self-ticks once a minute — no coordinator plumbing).
 
+## Player controls
+
+The center cluster intentionally contains only Previous, Play/Pause, and Next. Left/Right on the focused
+timeline remain the primary preview-seek interaction, so duplicate fixed rewind/forward buttons are omitted.
+Every focused button has an action label; Playback settings combines the existing quality selector with
+immediately-applied VOD playback speed. Live playback exposes a contextual **Go live** action on the focused
+timeline while behind the edge. VOD chapter boundaries are read from structured Innertube data, with
+timestamped descriptions as a fallback, and can be hidden under Playback settings in the app.
+
 ## Testing
 
 | Layer | Where | Run with |
@@ -58,7 +67,7 @@ the exhaustive + seeded-fuzz suite (`TransportControllerCompleteness.spec.bs`). 
 | B5 | `scanDir ∈ {-1,0,1}`; `scanLevel ∈ [0,3]`; `scanLevel ≥ 1 ⟹ scan/liveDvr` |
 | B6 | scrub and scan scratch never both set |
 | B8 | `scrubHeldDir ∈ {-1,0,1}` |
-| B9 | hold-accel scratch bounded: `scrubHoldTicks ≥ 0`; `scrubStepMs ∈ [storyboardStepMs, cap(duration)]` |
+| B9 | hold-accel scratch bounded: `scrubHoldTicks ≥ 0`; `scrubStepMs ∈ [10s, cap(duration)]` |
 
 (`seekSettling ⟹ a newly-entered transport defers its freeze-pause` is a *transition* property, not a snapshot
 predicate, so it is not in this catalog — it is enforced by `FreezeForTransport` and tested at the seam as

@@ -217,8 +217,8 @@
         <translation>Canales</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>Cuando terminas de mirar un video, se reproducirá otro automáticamente</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
         <source>Link with Wi-Fi</source>
@@ -465,20 +465,20 @@
         <translation>Cargando...</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Calidad preferida</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
         <source>Autoplay</source>
-        <translation>Reproducción automática</translation>
+        <translation>Autoplay</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Preferencias de reproducción de video</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Calidad de video preferida</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Proxy videos</source>
@@ -929,8 +929,8 @@
         <translation>Error al generar código de emparejamiento manual</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Reproducción</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
         <source>Request cancelled.</source>

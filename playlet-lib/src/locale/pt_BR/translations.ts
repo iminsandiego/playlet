@@ -429,16 +429,16 @@
         <translation>Erro de código de TV</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Preferências de reprodução</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Reprodução</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Qualidade de vídeo preferida</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Auto</source>
@@ -658,11 +658,11 @@
     </message>
     <message>
         <source>Autoplay</source>
-        <translation>Autoreproduzir</translation>
+        <translation>Autoplay</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Qualidade preferida</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
         <source>Invidious preferences</source>
@@ -1193,8 +1193,8 @@
         <translation>Carregando...</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>Quando você termina um vídeo, outro é reproduzido automaticamente</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
         <source>Only if needed</source>

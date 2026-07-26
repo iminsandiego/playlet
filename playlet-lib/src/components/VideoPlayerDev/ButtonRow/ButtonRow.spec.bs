@@ -10,12 +10,12 @@ namespace Tests
         protected override function beforeEach()
             m.top.transportMode = TransportController.Mode.Idle
             m.top.rowFocused = false
-            m.top.focusedIndex = 2
+            m.top.focusedIndex = 1
             m.top.playing = true
             m.top.previousEnabled = false
-            m.top.skipEnabled = true
             m.top.nextEnabled = false
             m.top.qualityLabel = "Auto"
+            m.top.speedLabel = "1x"
             m.top.captionsEnabled = false
             m.top.statsEnabled = false
             m.top.bookmarkAvailable = false
@@ -38,10 +38,10 @@ namespace Tests
 
         @it("exposes its button count and auto-positions the clusters (centered + right-aligned)")
         function _()
-            m.assertEqual(m.top.buttonCount, 10)
-            ' Both five-button clusters span 290px. The center cluster centers on 640; the feature cluster
-            ' right-aligns to 1212.
-            m.assertEqual(m.top.findNode("CenterCluster").translation[0], 495.0)
+            m.assertEqual(m.top.buttonCount, 8)
+            ' The three-button transport cluster centers on 640. The five-button feature cluster
+            ' remains right-aligned to 1212.
+            m.assertEqual(m.top.findNode("CenterCluster").translation[0], 557.0)
             m.assertEqual(m.top.findNode("RightCluster").translation[0], 922.0)
         end function
 
@@ -51,11 +51,9 @@ namespace Tests
         function _()
             m.top.rowFocused = false
             m.assertFalse(m.top.findNode("PreviousButton").focused)
-            m.assertFalse(m.top.findNode("SkipBackButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
-            m.assertFalse(m.top.findNode("SkipForwardButton").focused)
             m.assertFalse(m.top.findNode("NextButton").focused)
-            m.assertFalse(m.top.findNode("QualityButton").focused)
+            m.assertFalse(m.top.findNode("PlaybackSettingsButton").focused)
             m.assertFalse(m.top.findNode("CaptionsButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("BookmarkButton").focused)
@@ -70,17 +68,17 @@ namespace Tests
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("MinimizeButton").focused)
-            m.top.focusedIndex = 2
+            m.top.focusedIndex = 1
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertTrue(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("MinimizeButton").focused)
-            m.top.focusedIndex = 7
+            m.top.focusedIndex = 5
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertTrue(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("MinimizeButton").focused)
-            m.top.focusedIndex = 9
+            m.top.focusedIndex = 7
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
@@ -92,7 +90,7 @@ namespace Tests
         @it("nudge pulses the focused button's animation")
         function _()
             m.top.rowFocused = true
-            m.top.focusedIndex = 9
+            m.top.focusedIndex = 7
             anim = m.top.findNode("MinimizeButton").findNode("nudgeAnim")
             anim.control = "stop"
             m.top.nudge = true
@@ -102,7 +100,7 @@ namespace Tests
         @it("a nudge with an out-of-range focusedIndex is a safe no-op")
         function _()
             m.top.rowFocused = true
-            m.top.focusedIndex = 12
+            m.top.focusedIndex = 10
             playAnim = m.top.findNode("PlayPauseButton").findNode("nudgeAnim")
             statsAnim = m.top.findNode("StatsButton").findNode("nudgeAnim")
             minimizeAnim = m.top.findNode("MinimizeButton").findNode("nudgeAnim")
@@ -115,24 +113,18 @@ namespace Tests
             m.assertEqual(minimizeAnim.control, "stop")
         end function
 
-        @describe("queue + transport availability")
+        @describe("queue availability")
 
-        @it("dims unavailable queue controls and disables dedicated skips for live playback")
+        @it("dims unavailable queue controls")
         function _()
             m.top.previousEnabled = false
             m.top.nextEnabled = true
-            m.top.skipEnabled = false
             m.assertTrue(m.top.findNode("PreviousButton").disabled)
-            m.assertTrue(m.top.findNode("SkipBackButton").disabled)
-            m.assertTrue(m.top.findNode("SkipForwardButton").disabled)
             m.assertFalse(m.top.findNode("NextButton").disabled)
 
             m.top.previousEnabled = true
             m.top.nextEnabled = false
-            m.top.skipEnabled = true
             m.assertFalse(m.top.findNode("PreviousButton").disabled)
-            m.assertFalse(m.top.findNode("SkipBackButton").disabled)
-            m.assertFalse(m.top.findNode("SkipForwardButton").disabled)
             m.assertTrue(m.top.findNode("NextButton").disabled)
         end function
 
@@ -161,13 +153,62 @@ namespace Tests
             m.assertTrue(stats.active)
         end function
 
-        @describe("quality control")
+        @describe("playback settings control")
 
-        @it("uses the standard round button with a recognizable quality icon")
+        @it("uses the standard round button with a recognizable settings icon")
         function _()
-            quality = m.top.findNode("QualityButton")
-            m.assertEqual(quality.subtype(), "VideoPlayerButton")
-            m.assertEqual(quality.iconUri, "pkg:/images/icons/player/quality.png")
+            settings = m.top.findNode("PlaybackSettingsButton")
+            m.assertEqual(settings.subtype(), "VideoPlayerButton")
+            m.assertEqual(settings.iconUri, "pkg:/images/icons/player/quality.png")
+        end function
+
+        @describe("focus labels")
+
+        @it("is hidden with the row and describes play/pause state when focused")
+        function _()
+            m.top.rowFocused = false
+            m.assertFalse(m.top.findNode("FocusLabel").visible)
+
+            m.top.rowFocused = true
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.PlayPause
+            m.top.playing = true
+            m.assertTrue(m.top.findNode("FocusLabel").visible)
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.Pause))
+            m.top.playing = false
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.Play))
+        end function
+
+        @it("summarizes quality and speed on playback settings")
+        function _()
+            m.top.rowFocused = true
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+            m.top.qualityLabel = "4K"
+            m.top.speedLabel = "1.5x"
+            m.assertTrue(m.top.focusedLabel.InStr(Tr(Locale.VideoPlayer.PlaybackSettings)) >= 0)
+            m.assertTrue(m.top.focusedLabel.InStr("4K") >= 0)
+            m.assertTrue(m.top.focusedLabel.InStr("1.5x") >= 0)
+        end function
+
+        @it("describes toggle actions rather than only naming their icons")
+        function _()
+            m.top.rowFocused = true
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.Captions
+            m.top.captionsEnabled = false
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.TurnCaptionsOn))
+            m.top.captionsEnabled = true
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.TurnCaptionsOff))
+
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.Stats
+            m.top.statsEnabled = false
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.ShowStatsForNerds))
+            m.top.statsEnabled = true
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.HideStatsForNerds))
+
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.Bookmark
+            m.top.bookmarked = false
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.SaveVideo))
+            m.top.bookmarked = true
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.RemoveBookmark))
         end function
 
         @describe("caption + bookmark state")

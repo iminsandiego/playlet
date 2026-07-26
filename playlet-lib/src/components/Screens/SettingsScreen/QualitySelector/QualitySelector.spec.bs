@@ -20,6 +20,21 @@ namespace Tests
 
         @describe("embedded close contract")
 
+        @it("opens on Auto and only moves to Save after the final quality")
+        function _()
+            checkList = m.top.findNode("checkList")
+            m.assertTrue(checkList.isInFocusChain())
+            m.assertEqual(checkList.itemFocused, 0)
+
+            m.top.value = "1080p"
+            m.assertTrue(checkList.isInFocusChain(), "projecting a value keeps focus in the list")
+            m.assertEqual(checkList.itemFocused, 0, "the initial highlight remains on Auto")
+
+            checkList.itemFocused = checkList.content.getChildCount() - 1
+            checkList.navKey = RemoteKeys.Down
+            m.assertTrue(m.top.findNode("saveButton").isInFocusChain())
+        end function
+
         @it("save publishes the complete multi-quality value and then closes")
         function _()
             m.top.value = "1080p,720p"

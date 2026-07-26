@@ -765,32 +765,80 @@
         <translation>Failed to generate manual pairing code</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Playback</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Playback preferences</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
         <source>Autoplay</source>
         <translation>Autoplay</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>When you finish a video, another plays automatically</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Preferred quality</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Preferred video quality</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Auto</source>
         <translation>Auto</translation>
+    </message>
+    <message>
+        <source>Default playback speed</source>
+        <translation>Default playback speed</translation>
+    </message>
+    <message>
+        <source>Speed used when a video starts</source>
+        <translation>Speed used when a video starts</translation>
+    </message>
+    <message>
+        <source>0.25x</source>
+        <translation>0.25x</translation>
+    </message>
+    <message>
+        <source>0.5x</source>
+        <translation>0.5x</translation>
+    </message>
+    <message>
+        <source>0.75x</source>
+        <translation>0.75x</translation>
+    </message>
+    <message>
+        <source>1x</source>
+        <translation>1x</translation>
+    </message>
+    <message>
+        <source>1.25x</source>
+        <translation>1.25x</translation>
+    </message>
+    <message>
+        <source>1.5x</source>
+        <translation>1.5x</translation>
+    </message>
+    <message>
+        <source>1.75x</source>
+        <translation>1.75x</translation>
+    </message>
+    <message>
+        <source>2x</source>
+        <translation>2x</translation>
+    </message>
+    <message>
+        <source>Show chapter markers</source>
+        <translation>Show chapter markers</translation>
+    </message>
+    <message>
+        <source>Mark chapters on the progress bar when available</source>
+        <translation>Mark chapters on the progress bar when available</translation>
     </message>
     <message>
         <source>Backend</source>
@@ -983,6 +1031,70 @@
     <message>
         <source>Rewind live TV</source>
         <translation>Rewind live TV</translation>
+    </message>
+    <message>
+        <source>Go live</source>
+        <translation>Go live</translation>
+    </message>
+    <message>
+        <source>Previous video</source>
+        <translation>Previous video</translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation>Play</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation>Pause</translation>
+    </message>
+    <message>
+        <source>Next video</source>
+        <translation>Next video</translation>
+    </message>
+    <message>
+        <source>Playback settings</source>
+        <translation>Playback settings</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Default</translation>
+    </message>
+    <message>
+        <source>Speed for this video</source>
+        <translation>Speed for this video</translation>
+    </message>
+    <message>
+        <source>Turn captions on</source>
+        <translation>Turn captions on</translation>
+    </message>
+    <message>
+        <source>Turn captions off</source>
+        <translation>Turn captions off</translation>
+    </message>
+    <message>
+        <source>Show Stats for Nerds</source>
+        <translation>Show Stats for Nerds</translation>
+    </message>
+    <message>
+        <source>Hide Stats for Nerds</source>
+        <translation>Hide Stats for Nerds</translation>
+    </message>
+    <message>
+        <source>Save video</source>
+        <translation>Save video</translation>
+    </message>
+    <message>
+        <source>Remove bookmark</source>
+        <translation>Remove bookmark</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>Minimize</translation>
+    </message>
+    <message>
+        <source>Unavailable for live video</source>
+        <translation>Unavailable for live video</translation>
     </message>
     <message>
         <source>State:</source>

@@ -1,0 +1,63 @@
+namespace Tests
+
+    @SGNode("PlaybackSettingsPanel")
+    @suite
+    class PlaybackSettingsPanelTests extends Rooibos.BaseTestSuite
+
+        protected override function beforeEach()
+            m.top.qualityLabel = "Auto"
+            m.top.speedEnabled = true
+            m.top.speedDefaultValue = "1.0"
+            m.top.speedValue = "1.0"
+            m.top.focus = true
+        end function
+
+        @describe("settings behavior")
+
+        @it("shows the current quality and speed")
+        function _()
+            m.assertTrue(m.top.findNode("qualityButton").text.InStr("Default quality") >= 0)
+            m.assertTrue(m.top.findNode("qualityButton").text.InStr("Auto") >= 0)
+            m.assertTrue(m.top.findNode("speedButton").text.InStr("Speed for this video") >= 0)
+            m.assertTrue(m.top.findNode("speedButton").text.InStr("1x") >= 0)
+            m.assertTrue(m.top.findNode("speedButton").text.InStr("(Default)") >= 0)
+        end function
+
+        @it("cycles speed in both directions and publishes the selected value")
+        function _()
+            speed = m.top.findNode("speedButton")
+            speed.buttonSelected = true
+            m.assertEqual(m.top.speedValue, "1.25")
+            m.assertEqual(m.top.speedChanged, "1.25")
+            m.assertTrue(speed.text.InStr("(Default)") < 0)
+            speed.navKey = RemoteKeys.Left
+            m.assertEqual(m.top.speedValue, "1.0")
+            m.assertEqual(m.top.speedChanged, "1.0")
+        end function
+
+        @it("normalizes an unsupported speed without relying on host array extensions")
+        function _()
+            m.top.speedValue = "3.0"
+            m.assertEqual(m.top.speedValue, "1.0")
+            m.assertTrue(m.top.findNode("speedButton").text.InStr("1x") >= 0)
+        end function
+
+        @it("disables speed for live playback without changing its saved value")
+        function _()
+            m.top.speedEnabled = false
+            speed = m.top.findNode("speedButton")
+            m.assertTrue(speed.disabled)
+            speed.buttonSelected = true
+            m.assertEqual(m.top.speedValue, "1.0")
+            m.assertTrue(speed.text.InStr(Tr(Locale.VideoPlayer.SpeedUnavailableLive)) >= 0)
+        end function
+
+        @it("quality selection pulses the host request")
+        function _()
+            m.top.findNode("qualityButton").buttonSelected = true
+            m.assertTrue(m.top.requestQuality)
+        end function
+
+    end class
+
+end namespace

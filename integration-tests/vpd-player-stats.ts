@@ -28,9 +28,8 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — keeps playing through th
     await press(Key.Up); // trackbar -> button row
     await expectField('#buttonRow.rowFocused', true);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
-    await press(Key.Right); // play/pause -> skip forward
-    await press(Key.Right); // skip disabled Next -> Quality
-    await press(Key.Right); // Quality -> Captions
+    await press(Key.Right); // skip disabled Next -> Playback settings
+    await press(Key.Right); // Playback settings -> Captions
     await press(Key.Right); // Captions -> Stats
     await expectField('#buttonRow.focusedIndex', Button.stats);
     await expectField('#StatsButton.focused', true);
@@ -72,8 +71,7 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — keeps playing through th
     await press(Key.Ok); // reveal -> trackbar
     await expectField('#Chrome.opacity', 1);
     await press(Key.Up); // -> play/pause
-    await press(Key.Right); // -> skip forward
-    await press(Key.Right); // -> Quality
+    await press(Key.Right); // -> Playback settings
     await press(Key.Right); // -> Captions
     await press(Key.Right); // -> Stats
     await expectField('#buttonRow.focusedIndex', Button.stats);

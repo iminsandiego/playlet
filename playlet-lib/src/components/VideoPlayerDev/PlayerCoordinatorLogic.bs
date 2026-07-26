@@ -48,15 +48,13 @@ namespace PlayerCoordinatorLogic
     ' (m.buttons / its buttonCount field) — there is no separate count constant to keep in sync.
     enum PlayerButton
         Previous = 0
-        SkipBack = 1
-        PlayPause = 2
-        SkipForward = 3
-        NextVideo = 4
-        Quality = 5
-        Captions = 6
-        Stats = 7
-        Bookmark = 8
-        Minimize = 9
+        PlayPause = 1
+        NextVideo = 2
+        PlaybackSettings = 3
+        Captions = 4
+        Stats = 5
+        Bookmark = 6
+        Minimize = 7
     end enum
 
     ' The two focus targets above/at the trackbar: the bar itself (Left/Right scrub, the cursor grows) and the
@@ -171,12 +169,10 @@ namespace PlayerCoordinatorLogic
     end function
 
     ' Availability is a coordinator decision so virtual focus can skip disabled controls just as a real
-    ' SceneGraph focus chain would. Dedicated +/-10s controls are VOD-only; queue ends disable Previous/Next.
-    function ButtonEnabled(index as integer, hasPrevious as boolean, isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as boolean
+    ' SceneGraph focus chain would. Queue ends disable Previous/Next.
+    function ButtonEnabled(index as integer, hasPrevious as boolean, _isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as boolean
         if index = PlayerButton.Previous
             return hasPrevious
-        else if index = PlayerButton.SkipBack or index = PlayerButton.SkipForward
-            return not isLive
         else if index = PlayerButton.NextVideo
             return hasNext
         else if index = PlayerButton.Bookmark
@@ -216,6 +212,32 @@ namespace PlayerCoordinatorLogic
         return quality
     end function
 
+    ' Compact standing label for the persisted playback speed string.
+    function PlaybackSpeedLabel(value as dynamic) as string
+        speed = ValidString(value).Trim()
+        if speed = "" or Val(speed) <= 0
+            return "1x"
+        end if
+        if speed.EndsWith(".0")
+            speed = speed.Left(speed.Len() - 2)
+        end if
+        return speed + "x"
+    end function
+
+    ' One runtime source of truth shared by playback-speed validation and the in-player settings panel.
+    function PlaybackSpeedValues() as object
+        return ["0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
+    end function
+
+    function IsSupportedPlaybackSpeed(value as string) as boolean
+        for each supported in PlaybackSpeedValues()
+            if value = supported
+                return true
+            end if
+        end for
+        return false
+    end function
+
     ' Move focus between the tiers: Down goes buttons -> bar; Up goes bar -> buttons. No wrap (the buttons are
     ' the top tier, the bar the bottom).
     function NextFocusTarget(current as integer, key as string) as integer
@@ -230,7 +252,7 @@ namespace PlayerCoordinatorLogic
     ' Pick the first usable tile-set from the OS's native Video.thumbnailTiles field, or invalid. thumbnailTiles
     ' is documented (Video node docs) as {tile_id: [tile_set, ...]}; a tile_set carries htiles/vtiles (grid),
     ' tiles (sheet array, tiles[i][0] = sheet url), duration (seconds per sheet), and final_time (total seconds).
-    ' BifDisplay reads those native fields directly; the coordinator uses TileSetIntervalMs for the scrub step.
+    ' BifDisplay reads those native fields directly; TileSetIntervalMs selects the closest visual frame only.
     function PickThumbnailTileSet(tiles as object) as object
         if not IsAssociativeArray(tiles)
             return invalid

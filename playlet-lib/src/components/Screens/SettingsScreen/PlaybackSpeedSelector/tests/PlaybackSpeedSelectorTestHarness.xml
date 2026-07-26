@@ -1,0 +1,6 @@
+<component name="PlaybackSpeedSelectorTestHarness" extends="PlaybackSpeedSelector">
+    <interface>
+        <function name="TestKey" />
+        <function name="TestCompleteClose" />
+    </interface>
+</component>

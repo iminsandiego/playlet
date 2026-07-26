@@ -59,7 +59,11 @@ function Initialize()
 
     m.errorDialogNode = invalid
     m.statsForNerds = invalid
+    m.playbackSettingsPanel = invalid
     m.qualitySelector = invalid
+    ' Per-video playback speed. Invalid means the configured default is effective; a player-panel choice lives
+    ' only until PlayWithContent starts the next video.
+    m.currentPlaybackSpeedOverride = invalid
     m.statsEnabled = false
     m.captionsEnabled = false
     m.bookmarkAvailable = false
@@ -80,7 +84,7 @@ function Initialize()
     m.lastFinishSeq = 0
     ' a keep-playing seek (SponsorBlock skip / InstantReplay) was issued while the device was PAUSED. The
     ' device auto-resumes on any seek (autoplayAfterSeek only governs resume-after-REBUFFER per the Video
-    ' docs), so the paused state is preserved by re-pausing on the next playing edge.
+    ' docs), so the paused state is preserved by re-pausing after stable target confirmation.
     m.repauseAfterSeek = false
     ' live edge clock anchor: the manifest's availabilityStartTime (Playlet generates it), as epoch seconds.
     ' The edge is then wallClock - anchor — continuous through pauses/rebuffers/startup. The fallback pair
@@ -170,11 +174,12 @@ function OnNodeReady()
     m.top.ObserveField("position", FuncName(OnPosition))
     m.top.ObserveField("duration", FuncName(OnDuration))
     m.top.ObserveField("close", FuncName(OnClose))
-    ' native trickplay tiles arrive after the manifest loads -> feed the bif + scrub step (VOD only).
+    ' Native trickplay tiles arrive after the manifest loads -> feed the visual BIF cadence (VOD only).
     m.top.ObserveField("thumbnailTiles", FuncName(OnThumbnailTiles))
     ' an external resume/play (the linked phone via Lounge) under an active transport must take over.
     m.top.ObserveField("control", FuncName(OnControlChange))
     m.top.ObserveField("globalCaptionMode", FuncName(OnCaptionModeChange))
+    m.top.ObserveField("playbackSpeed", FuncName(OnPlaybackSpeedChange))
     if m.videoQueue <> invalid
         m.videoQueue.ObserveFieldScoped("hasPrevious", FuncName(OnQueueAvailabilityChange))
         m.videoQueue.ObserveFieldScoped("hasNext", FuncName(OnQueueAvailabilityChange))
@@ -182,9 +187,15 @@ function OnNodeReady()
     if m.bookmarksService <> invalid
         m.bookmarksService.ObserveFieldScoped("contentChange", FuncName(OnBookmarksChange))
     end if
+    if m.top.preferences <> invalid
+        m.top.preferences.ObserveFieldScoped("playback.preferred_speed", FuncName(OnPreferredSpeedChange))
+        m.top.preferences.ObserveFieldScoped("playback.show_chapter_markers", FuncName(OnChapterMarkerPreferenceChange))
+    end if
 
     SyncCaptionState()
     SyncBookmarkState()
+    OnPreferredSpeedChange()
+    OnChapterMarkerPreferenceChange()
     SetupStatsForNerds()
 
     ' a player that starts minimized shows the PiP hint (1s after the shrink settles, auto-hides after 5s).
@@ -206,8 +217,8 @@ function ApplyTransport() as void
     ' A transport freezes the video. While one is active, disable auto-resume-after-rebuffer so an in-flight or
     ' pending seek (a replay that kept playing, a SponsorBlock skip) can't un-pause the freeze when it completes;
     ' restored to the default at idle so commit's resume + the normal seek-resume behave. But NOT while a
-    ' play-through seek is still settling: that seek must still reach "playing" so EnforceTransportFreeze can
-    ' freeze it cleanly — disabling autoplay here would strand it buffering. seekSettling clears at state=playing.
+    ' play-through seek is still settling: that seek must reach stable target-position samples so
+    ' EnforceTransportFreeze can freeze it cleanly — disabling autoplay here would strand it buffering.
     ' Write-guarded: this runs on every position tick, and most ticks don't change the value.
     autoplayAfterSeek = (m.transport.transportMode = TransportController.Mode.Idle) or m.transport.seekSettling
     if m.top.autoplayAfterSeek <> autoplayAfterSeek
@@ -226,7 +237,7 @@ function ApplyTransport() as void
         if intent.hasSeek
             ' a keep-playing seek issued while the device is PAUSED must preserve the pause: the device
             ' auto-resumes on any seek (autoplayAfterSeek only covers rebuffer-resume), so flag a re-pause
-            ' for the playing edge the resume produces.
+            ' for stable target confirmation.
             if intent.control = TransportController.Control.None and m.top.state = VideoState.Paused
                 m.repauseAfterSeek = true
             end if
@@ -447,8 +458,16 @@ function OnOkPress() as boolean
         return true
     end if
 
-    ' the OK/Select state machine while idle: VOD pauses/resumes/reveals by play + HUD state, live toggles the HUD.
     chromeShown = (m.chromeMode = ChromeMode.Shown or m.chromeMode = ChromeMode.FadingIn)
+    ' A focused, visible live bar advertises "OK Go live" while behind. Hidden chrome retains the normal first-OK
+    ' reveal, and the button tier owns its own OK actions before reaching this function.
+    if chromeShown and m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Bar and m.transport.GoLive()
+        ApplyTransport()
+        HideChrome()
+        return true
+    end if
+
+    ' the OK/Select state machine while idle: VOD pauses/resumes/reveals by play + HUD state, live toggles the HUD.
     action = PlayerCoordinatorLogic.OkActionInIdle(m.top.state, chromeShown, m.transport.isLive)
     LogDebug("OK idle: state=", m.top.state, " chromeShown=", chromeShown, " isLive=", m.transport.isLive, " action=", action)
     ApplyOkAction(action)
@@ -569,28 +588,14 @@ function ActivateButton(index as integer) as void
         HideChromeNow()
         m.videoQueue.previous = true
         return
-    else if index = PlayerCoordinatorLogic.PlayerButton.SkipBack
-        if m.transport.SeekBy(-TransportController.SKIP_10_SECONDS_MS)
-            ApplyTransport()
-        else
-            m.buttonRow.nudge = true
-        end if
-        ArmAutoHide()
     else if index = PlayerCoordinatorLogic.PlayerButton.PlayPause
         TogglePlayPause()
-    else if index = PlayerCoordinatorLogic.PlayerButton.SkipForward
-        if m.transport.SeekBy(TransportController.SKIP_10_SECONDS_MS)
-            ApplyTransport()
-        else
-            m.buttonRow.nudge = true
-        end if
-        ArmAutoHide()
     else if index = PlayerCoordinatorLogic.PlayerButton.NextVideo
         HideChromeNow()
         m.videoQueue.next = true
         return
-    else if index = PlayerCoordinatorLogic.PlayerButton.Quality
-        OpenQualitySelector()
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+        OpenPlaybackSettings()
         return
     else if index = PlayerCoordinatorLogic.PlayerButton.Captions
         ToggleCaptions()
@@ -618,9 +623,9 @@ function SyncFocus() as void
     m.buttonRow.focusedIndex = m.focusedButton
     m.buttonRow.playing = (m.top.state = VideoState.Playing)
     m.buttonRow.previousEnabled = HasPreviousQueueItem()
-    m.buttonRow.skipEnabled = not m.transport.isLive
     m.buttonRow.nextEnabled = HasNextQueueItem()
     m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(CurrentQualityPreference())
+    m.buttonRow.speedLabel = PlayerCoordinatorLogic.PlaybackSpeedLabel(CurrentPlaybackSpeedValue())
     m.buttonRow.captionsEnabled = m.captionsEnabled
     m.buttonRow.statsEnabled = m.statsEnabled
     m.buttonRow.bookmarkAvailable = m.bookmarkAvailable
@@ -653,9 +658,8 @@ function OnQueueAvailabilityChange(_event as object) as void
 end function
 
 '===============================================================================
-' QUALITY — the upstream selector hosted as a player-owned modal. Saving changes the preference used when
-' the next VideoContentJob resolves; the current stream is deliberately left intact so opening the selector
-' never loses position, queue, pause, auth, or SponsorBlock state.
+' PLAYBACK SETTINGS — one player-owned modal for the honest global quality default and current-video speed.
+' Quality still uses the upstream multi-select preference selector; speed never mutates that global default.
 '===============================================================================
 function CurrentQualityPreference() as string
     if m.top.preferences = invalid
@@ -668,6 +672,80 @@ function CurrentQualityPreference() as string
     return value
 end function
 
+function OpenPlaybackSettings() as void
+    if m.playbackSettingsPanel <> invalid or m.qualitySelector <> invalid
+        return
+    end if
+
+    panel = CreateObject("roSGNode", "PlaybackSettingsPanel")
+    if panel = invalid
+        LogError("Failed to create PlaybackSettingsPanel")
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    panel.qualityLabel = PlayerCoordinatorLogic.QualityLabel(CurrentQualityPreference())
+    panel.speedDefaultValue = CurrentPlaybackSpeedPreference()
+    panel.speedValue = CurrentPlaybackSpeedValue()
+    panel.speedEnabled = PlaybackSpeedAvailable()
+    panel.ObserveFieldScoped("requestQuality", FuncName(OnPlaybackSettingsQuality))
+    panel.ObserveFieldScoped("speedChanged", FuncName(OnPlaybackSettingsSpeed))
+    panel.ObserveFieldScoped("closed", FuncName(OnPlaybackSettingsClosed))
+    m.top.AppendChild(panel)
+    m.playbackSettingsPanel = panel
+
+    HideChromeNow()
+    NodeSetFocus(panel, true)
+end function
+
+function OnPlaybackSettingsQuality(event as object) as void
+    panel = event.GetRoSGNode()
+    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
+        return
+    end if
+    NodeSetFocus(panel, false)
+    OpenQualitySelector()
+end function
+
+function OnPlaybackSettingsSpeed(event as object) as void
+    panel = event.GetRoSGNode()
+    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
+        return
+    end if
+    SetCurrentPlaybackSpeed(ValidString(event.GetData()))
+end function
+
+function OnPlaybackSettingsClosed(event as object) as void
+    panel = event.GetRoSGNode()
+    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
+        return
+    end if
+    RemovePlaybackSettings()
+    if m.onCloseCalled = true
+        return
+    end if
+    NodeSetFocus(m.top, true)
+    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
+    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+    ShowChrome(true)
+end function
+
+function RemovePlaybackSettings() as void
+    panel = m.playbackSettingsPanel
+    if panel = invalid
+        return
+    end if
+    panel.UnobserveFieldScoped("requestQuality")
+    panel.UnobserveFieldScoped("speedChanged")
+    panel.UnobserveFieldScoped("closed")
+    parent = panel.GetParent()
+    if parent <> invalid
+        parent.RemoveChild(panel)
+    end if
+    m.playbackSettingsPanel = invalid
+end function
+
 function OpenQualitySelector() as void
     if m.qualitySelector <> invalid
         return
@@ -676,8 +754,9 @@ function OpenQualitySelector() as void
     selector = CreateObject("roSGNode", "QualitySelector")
     if selector = invalid
         LogError("Failed to create QualitySelector")
-        m.buttonRow.nudge = true
-        ArmAutoHide()
+        if m.playbackSettingsPanel <> invalid
+            NodeSetFocus(m.playbackSettingsPanel, true)
+        end if
         return
     end if
 
@@ -689,7 +768,6 @@ function OpenQualitySelector() as void
     selector.ObserveFieldScoped("closed", FuncName(OnQualitySelectorClosed))
     m.qualitySelector = selector
 
-    HideChromeNow()
     NodeSetFocus(selector, true)
 end function
 
@@ -707,6 +785,9 @@ function OnQualitySelectorSave(event as object) as void
         m.top.preferences["playback.preferred_quality"] = value
     end if
     m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(value)
+    if m.playbackSettingsPanel <> invalid
+        m.playbackSettingsPanel.qualityLabel = m.buttonRow.qualityLabel
+    end if
 end function
 
 function OnQualitySelectorClosed(event as object) as void
@@ -720,10 +801,14 @@ function OnQualitySelectorClosed(event as object) as void
         return
     end if
 
-    NodeSetFocus(m.top, true)
-    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
-    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.Quality
-    ShowChrome(true)
+    if m.playbackSettingsPanel <> invalid
+        NodeSetFocus(m.playbackSettingsPanel, true)
+    else
+        NodeSetFocus(m.top, true)
+        m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
+        m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+        ShowChrome(true)
+    end if
 end function
 
 function RemoveQualitySelector() as void
@@ -739,6 +824,105 @@ function RemoveQualitySelector() as void
         parent.RemoveChild(selector)
     end if
     m.qualitySelector = invalid
+end function
+
+function CurrentPlaybackSpeedPreference() as string
+    if m.top.preferences = invalid
+        return "1.0"
+    end if
+    value = ValidString(m.top.preferences["playback.preferred_speed"])
+    if not IsSupportedPlaybackSpeed(value)
+        return "1.0"
+    end if
+    return value
+end function
+
+function CurrentPlaybackSpeedValue() as string
+    speed = ValidFloat(m.top.playbackSpeed)
+    for each value in PlayerCoordinatorLogic.PlaybackSpeedValues()
+        if Abs(speed - Val(value)) < 0.001
+            return value
+        end if
+    end for
+    return "1.0"
+end function
+
+function IsSupportedPlaybackSpeed(value as string) as boolean
+    return PlayerCoordinatorLogic.IsSupportedPlaybackSpeed(value)
+end function
+
+function PlaybackSpeedAvailable() as boolean
+    return m.top.HasField("playbackSpeed") and not m.transport.isLive
+end function
+
+function SetCurrentPlaybackSpeed(value as string) as void
+    if not IsSupportedPlaybackSpeed(value)
+        value = CurrentPlaybackSpeedPreference()
+    end if
+    m.currentPlaybackSpeedOverride = value
+    ApplyPlaybackSpeed(value)
+end function
+
+function OnPreferredSpeedChange(_event = invalid as dynamic) as void
+    ' A default edited from app/web settings must not override an explicit choice for the video already playing.
+    if m.currentPlaybackSpeedOverride = invalid
+        ApplyPlaybackSpeed(CurrentPlaybackSpeedPreference())
+    else
+        OnPlaybackSpeedChange()
+    end if
+end function
+
+function ResetCurrentPlaybackSpeed(applyDefault = true as boolean) as void
+    m.currentPlaybackSpeedOverride = invalid
+    if applyDefault
+        ApplyPlaybackSpeed(CurrentPlaybackSpeedPreference())
+    end if
+end function
+
+function ApplyPlaybackSpeed(value as string) as void
+    if not m.top.HasField("playbackSpeed")
+        return
+    end if
+    speed = Val(value)
+    if speed <= 0 or m.transport.isLive
+        speed = 1.0
+    end if
+    if Abs(ValidFloat(m.top.playbackSpeed) - speed) < 0.001
+        OnPlaybackSpeedChange()
+        return
+    end if
+
+    wasPlaying = (m.top.state = VideoState.Playing)
+    if wasPlaying
+        m.top.control = VideoControl.Pause
+    end if
+    m.top.playbackSpeed = speed
+    if wasPlaying
+        m.top.control = VideoControl.Resume
+    end if
+    Lounge.SendPlaybackSpeedChanged(speed, not m.transport.isLive)
+end function
+
+function OnPlaybackSpeedChange(_event = invalid as dynamic) as void
+    value = CurrentPlaybackSpeedValue()
+    if m.buttonRow <> invalid
+        m.buttonRow.speedLabel = PlayerCoordinatorLogic.PlaybackSpeedLabel(value)
+    end if
+    if m.playbackSettingsPanel <> invalid
+        m.playbackSettingsPanel.speedValue = value
+        m.playbackSettingsPanel.speedDefaultValue = CurrentPlaybackSpeedPreference()
+        m.playbackSettingsPanel.speedEnabled = PlaybackSpeedAvailable()
+    end if
+end function
+
+function OnChapterMarkerPreferenceChange(_event = invalid as dynamic) as void
+    show = true
+    if m.top.preferences <> invalid
+        show = (m.top.preferences["playback.show_chapter_markers"] = true)
+    end if
+    if m.trickPlayBar <> invalid
+        m.trickPlayBar.showChapterMarkers = show
+    end if
 end function
 
 '===============================================================================
@@ -1069,15 +1253,12 @@ function OnVideoState(event as object) as void
             m.spinner.mode = SpinMode.Off
             LogInfo("first frame: ready=true, loading overlay off")
         end if
-        ' reaching "playing" means any in-flight play-through seek has landed. Clear the settling flag before
-        ' the freeze so a transport that deferred its pause now freezes this settled-playing video.
-        m.transport.MarkSeekSettled()
+        ' Do not clear seekSettling on this state edge alone: Roku can report a transient "playing" while the
+        ' seek is still unstable. OnPosition confirms the target twice, then EnforceTransportFreeze below that
+        ' position path freezes any transport that was waiting.
         EnforceTransportFreeze("OnVideoState")
         ' a keep-playing seek issued while paused has landed (the device auto-resumed): restore the pause.
-        if m.repauseAfterSeek
-            m.repauseAfterSeek = false
-            m.top.control = VideoControl.Pause
-        end if
+        CompleteDeferredRepause()
         ' the stream actually played -> any later error is not a 403; stop retrying stream URLs.
         m.videoPlayedSuccessfully = true
         ' recovered after an error dialog -> dismiss it.
@@ -1111,6 +1292,12 @@ end function
 ' event). Re-pausing yields state=paused -> OnPosition stops -> no loop.
 function EnforceTransportFreeze(source as string) as void
     inTransport = (m.transport.transportMode <> TransportController.Mode.Idle)
+    ' A transport may be previewing while a prior play-through seek is still resolving. Neither a transient
+    ' playing state nor a stale position event is permission to pause mid-seek; OnPosition clears this gate only
+    ' after two target-matching samples, and that same tick returns here to perform the safe freeze.
+    if inTransport and m.transport.seekSettling
+        return
+    end if
     action = PlayerCoordinatorLogic.TransportSafetyAction(m.top.state, inTransport, m.transport.isLive, Int(m.top.position * 1000), m.transport.cursorMs, m.transport.durationMs, m.transport.SafetyFloorMs())
     if action = PlayerCoordinatorLogic.SafetyAction.Freeze
         m.top.control = VideoControl.Pause
@@ -1153,6 +1340,15 @@ function EnforceTransportFreeze(source as string) as void
         m.transport.ResetTransport()
         ApplyTransport()
         OnPlaybackFinished()
+    end if
+end function
+
+' A keep-playing seek issued from a paused device must restore pause, but not on Roku's first transient
+' "playing" edge. The same stable-target gate used by transport freeze owns this seam too.
+function CompleteDeferredRepause() as void
+    if m.repauseAfterSeek and not m.transport.seekSettling
+        m.repauseAfterSeek = false
+        m.top.control = VideoControl.Pause
     end if
 end function
 
@@ -1218,6 +1414,7 @@ function OnPosition(event as object) as void
     if m.onCloseCalled = true
         return
     end if
+    CompleteDeferredRepause()
 
     ' SponsorBlock auto-skip off the real position (the controller decides; we apply the seek / finish).
     sb = m.sponsorblock.OnPosition(posMs)
@@ -1395,6 +1592,9 @@ end function
 '===============================================================================
 function PlayWithContent(contentNode as object)
     LogInfo("PlayWithContent videoId=", contentNode.videoId, " title=", contentNode.title)
+    ' Clear the outgoing video's override now, but wait for OnVideoContentJobDone to apply the default after
+    ' the new content's live/VOD policy is known.
+    ResetCurrentPlaybackSpeed(false)
     videoContentNode = CreateObject("roSGNode", "ContentNode")
 
     if not StringUtils.IsNullOrEmpty(contentNode.videoId)
@@ -1426,8 +1626,8 @@ function PlayWithContent(contentNode as object)
 
     StartVideoContentJob(videoContentNode)
 
-    ' tell the cast/lounge side we are loading (resets playback speed to 1.0 when playback starts).
-    playbackSpeed = ValidFloat(m.top.playbackSpeed)
+    ' Tell the cast/lounge side we are loading, including the current/preferred playback speed.
+    playbackSpeed = Val(CurrentPlaybackSpeedPreference())
     if playbackSpeed <= 0
         playbackSpeed = 1.0
     end if
@@ -1440,6 +1640,7 @@ function StartVideoContentJob(videoContentNode as object)
     end if
 
     m.top.content = videoContentNode
+    m.trickPlayBar.chapters = []
     m.top.content.ObserveField("title", FuncName(OnContentMetaChange))
     m.top.content.ObserveField("secondaryTitle", FuncName(OnContentMetaChange))
     UpdateOverlayMeta()
@@ -1484,9 +1685,8 @@ function OnVideoContentJobDone(event as object) as void
 
     metadata = content.metadata
 
-    ' The scrub step + bif tiles come from the native Video.thumbnailTiles field, which the OS populates after
-    ' the manifest loads (OnThumbnailTiles) — start with the defaults + a cleared bif and let OnThumbnailTiles
-    ' fill them in for VOD.
+    ' BIF tiles come from the native Video.thumbnailTiles field, which the OS populates after the manifest
+    ' loads (OnThumbnailTiles). Transport remains a fixed 10 seconds regardless of that visual cadence.
     isLive = content <> invalid and content.Live = true
     m.transport.SetContent(isLive, 2000, false)
     SendHealSummary() ' the previous content's capped heal tally, if any
@@ -1499,7 +1699,9 @@ function OnVideoContentJobDone(event as object) as void
     m.transport.SetLiveDvrWindow(ValidInt(metadata.liveSeekableWindowSec) * 1000)
     m.trickPlayBar.isLive = isLive
     m.trickPlayBar.canRewind = m.transport.CanRewindLive()
+    m.trickPlayBar.chapters = ValidArray(metadata.chapters)
     m.bifDisplay.tileSet = invalid
+    ApplyPlaybackSpeed(CurrentPlaybackSpeedPreference())
 
     ' anchor the live edge clock at the cushioned availabilityStartTime and start the 1s heartbeat: the brain
     ' gets a continuous edge (OnLiveEdge) that keeps advancing through pauses, so the time-behind offset is
@@ -1897,6 +2099,7 @@ function OnClose() as void
     m.top.unobserveField("thumbnailTiles")
     m.top.unobserveField("control")
     m.top.unobserveField("globalCaptionMode")
+    m.top.unobserveField("playbackSpeed")
     m.top.unobserveField("close")
     if m.videoQueue <> invalid
         m.videoQueue.unobserveFieldScoped("hasPrevious")
@@ -1905,7 +2108,12 @@ function OnClose() as void
     if m.bookmarksService <> invalid
         m.bookmarksService.unobserveFieldScoped("contentChange")
     end if
+    if m.top.preferences <> invalid
+        m.top.preferences.unobserveFieldScoped("playback.preferred_speed")
+        m.top.preferences.unobserveFieldScoped("playback.show_chapter_markers")
+    end if
     RemoveQualitySelector()
+    RemovePlaybackSettings()
     content = m.top.content
     if content <> invalid
         content.unobserveField("title")

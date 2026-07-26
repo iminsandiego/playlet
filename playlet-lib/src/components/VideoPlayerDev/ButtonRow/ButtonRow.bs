@@ -1,4 +1,6 @@
+import "pkg:/components/VideoPlayerDev/PlayerCoordinatorLogic.bs"
 import "pkg:/components/VideoPlayerDev/TransportController.bs"
+import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/Types.bs"
 
 ' Trackbar track spans x=68..1212: right cluster right-aligns to 1212, center cluster centers on 640.
@@ -12,22 +14,21 @@ function Init()
     ' Focus order MUST match PlayerCoordinatorLogic.PlayerButton.
     m.buttons = [
         m.top.findNode("PreviousButton")
-        m.top.findNode("SkipBackButton")
         m.top.findNode("PlayPauseButton")
-        m.top.findNode("SkipForwardButton")
         m.top.findNode("NextButton")
-        m.top.findNode("QualityButton")
+        m.top.findNode("PlaybackSettingsButton")
         m.top.findNode("CaptionsButton")
         m.top.findNode("StatsButton")
         m.top.findNode("BookmarkButton")
         m.top.findNode("MinimizeButton")
     ]
+    m.focusLabel = m.top.findNode("FocusLabel")
     m.centerCluster = m.top.findNode("CenterCluster")
     m.rightCluster = m.top.findNode("RightCluster")
     LayoutClusters()
     m.top.buttonCount = m.buttons.Count() ' coordinator reads this to clamp focus
 
-    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "skipEnabled", "nextEnabled", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
+    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "nextEnabled", "qualityLabel", "speedLabel", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
         m.top.ObserveField(field, FuncName(Repaint))
     end for
     m.top.ObserveField("nudge", FuncName(OnNudge))
@@ -88,18 +89,53 @@ function Repaint() as void
     m.top.visible = (m.top.transportMode = TransportController.Mode.Idle)
 
     m.buttons[0].disabled = not m.top.previousEnabled
-    m.buttons[1].disabled = not m.top.skipEnabled
-    m.buttons[2].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
-    m.buttons[3].disabled = not m.top.skipEnabled
-    m.buttons[4].disabled = not m.top.nextEnabled
-    m.buttons[6].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
-    m.buttons[6].active = m.top.captionsEnabled
-    m.buttons[7].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
-    m.buttons[7].active = m.top.statsEnabled
-    m.buttons[8].disabled = not m.top.bookmarkAvailable
-    m.buttons[8].active = m.top.bookmarked
+    m.buttons[1].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
+    m.buttons[2].disabled = not m.top.nextEnabled
+    m.buttons[4].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
+    m.buttons[4].active = m.top.captionsEnabled
+    m.buttons[5].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
+    m.buttons[5].active = m.top.statsEnabled
+    m.buttons[6].disabled = not m.top.bookmarkAvailable
+    m.buttons[6].active = m.top.bookmarked
 
     for i = 0 to m.buttons.Count() - 1
         m.buttons[i].focused = m.top.rowFocused and i = m.top.focusedIndex
     end for
+    m.focusLabel.visible = m.top.rowFocused
+    if m.top.rowFocused
+        m.focusLabel.text = FocusLabelFor(m.top.focusedIndex)
+    end if
+end function
+
+function FocusLabelFor(index as integer) as string
+    if index = PlayerCoordinatorLogic.PlayerButton.Previous
+        return Tr(Locale.VideoPlayer.PreviousVideo)
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlayPause
+        if m.top.playing
+            return Tr(Locale.VideoPlayer.Pause)
+        end if
+        return Tr(Locale.VideoPlayer.Play)
+    else if index = PlayerCoordinatorLogic.PlayerButton.NextVideo
+        return Tr(Locale.VideoPlayer.NextVideo)
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+        return Tr(Locale.VideoPlayer.PlaybackSettings) + "  " + m.top.qualityLabel + "  " + m.top.speedLabel
+    else if index = PlayerCoordinatorLogic.PlayerButton.Captions
+        if m.top.captionsEnabled
+            return Tr(Locale.VideoPlayer.TurnCaptionsOff)
+        end if
+        return Tr(Locale.VideoPlayer.TurnCaptionsOn)
+    else if index = PlayerCoordinatorLogic.PlayerButton.Stats
+        if m.top.statsEnabled
+            return Tr(Locale.VideoPlayer.HideStatsForNerds)
+        end if
+        return Tr(Locale.VideoPlayer.ShowStatsForNerds)
+    else if index = PlayerCoordinatorLogic.PlayerButton.Bookmark
+        if m.top.bookmarked
+            return Tr(Locale.VideoPlayer.RemoveBookmark)
+        end if
+        return Tr(Locale.VideoPlayer.SaveVideo)
+    else if index = PlayerCoordinatorLogic.PlayerButton.Minimize
+        return Tr(Locale.VideoPlayer.Minimize)
+    end if
+    return ""
 end function

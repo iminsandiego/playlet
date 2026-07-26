@@ -2,6 +2,7 @@ import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.bs"
 import "pkg:/components/Services/Innertube/InnertubeService.bs"
 import "pkg:/components/Services/Invidious/InvidiousService.bs"
 import "pkg:/source/utils/CancellationUtils.bs"
+import "pkg:/source/utils/ChapterMarkers.bs"
 import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/MessagePortUtils.bs"
 
@@ -92,6 +93,12 @@ function ExecuteJob() as void
     if metadata = invalid
         JobError("Failed to get video metadata")
         return
+    end if
+
+    ' Playlet's Innertube parser forwards structured chapters. Backends that expose only a timestamped
+    ' description still get the same normalized chapter model.
+    if not IsArray(metadata.chapters) or metadata.chapters.Count() < 2
+        metadata["chapters"] = ChapterMarkers.FromDescription(metadata.description, ValidInt(metadata.lengthSeconds) * 1000)
     end if
 
     title = metadata.title

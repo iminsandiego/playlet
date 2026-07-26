@@ -1,0 +1,30 @@
+import "pkg:/source/utils/FeedErrorPolicy.bs"
+
+namespace Tests
+
+    @suite
+    class FeedErrorPolicyTests extends Rooibos.BaseTestSuite
+
+        @describe("modal visibility policy")
+
+        @it("suppresses cancelled and hidden-screen feed failures")
+        function _()
+            m.assertFalse(FeedErrorPolicy.ShouldShowModal("network failed", true, true))
+            m.assertFalse(FeedErrorPolicy.ShouldShowModal("network failed", false, false))
+        end function
+
+        @it("suppresses transient upstream server errors")
+        function _()
+            m.assertFalse(FeedErrorPolicy.ShouldShowModal("Reason:Internal server error" + Chr(10) + "StatusCode: 500", false, true))
+            m.assertFalse(FeedErrorPolicy.ShouldShowModal("StatusCode: 503", false, true))
+        end function
+
+        @it("retains foreground dialogs for actionable non-server failures")
+        function _()
+            m.assertTrue(FeedErrorPolicy.ShouldShowModal("Authentication required", false, true))
+            m.assertTrue(FeedErrorPolicy.ShouldShowModal("StatusCode: 404", false, true))
+        end function
+
+    end class
+
+end namespace

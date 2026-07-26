@@ -59,7 +59,12 @@
         <function name="TestSetVideoId" />
         <function name="TestAddBookmarkExternally" />
         <function name="TestSaveQuality" />
+        <function name="TestOpenQualityFromPanel" />
         <function name="TestCloseQuality" />
+        <function name="TestSetPlaybackSpeed" />
+        <function name="TestResetPlaybackSpeedForNewContent" />
+        <function name="TestClosePlaybackSettings" />
+        <function name="TestSetChapters" />
         <function name="TestFireLiveBadgeHold" />
         <function name="TestKillAutoHide" />
         <function name="TestFinishChromeFadeOut" />

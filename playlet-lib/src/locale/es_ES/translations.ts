@@ -505,8 +505,8 @@
         <translation>Roku conectado a:</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Calidad preferida</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
         <source>Enabled</source>
@@ -897,8 +897,8 @@
         <translation>Cargando...</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Calidad de vídeo preferida</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Instance</source>
@@ -1001,12 +1001,12 @@
         <translation>Error al general código de emparejamiento manual</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Reproducción</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Ajustes de reproducción</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
         <source>Invidious preferences</source>
@@ -1046,11 +1046,11 @@
     </message>
     <message>
         <source>Autoplay</source>
-        <translation>Reproducción automática</translation>
+        <translation>Autoplay</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>Al terminar de ver un video, otro se reproduce automáticamente</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
         <source>SponsorBlock preferences</source>

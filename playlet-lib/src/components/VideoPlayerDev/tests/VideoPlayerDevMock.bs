@@ -54,7 +54,11 @@ function TestSetup() as void
     preferences = createObject("roSGNode", "Node")
     preferences.addField("playback.stats_for_nerds", "boolean", false)
     preferences.addField("playback.preferred_quality", "string", false)
+    preferences.addField("playback.preferred_speed", "string", false)
+    preferences.addField("playback.show_chapter_markers", "boolean", false)
     preferences["playback.preferred_quality"] = "auto"
+    preferences["playback.preferred_speed"] = "1.0"
+    preferences["playback.show_chapter_markers"] = true
     m.top.preferences = preferences
     m.top.invidious = createObject("roSGNode", "Node")
     ' the queue stub carries the fields the finish/close paths touch (VideoQueueUtils.PlayNext reads hasNext;
@@ -93,7 +97,7 @@ function TestSetup() as void
     ' nudge counter above — stacked observers fire a handler once per prior TestSetup on every write,
     ' and OnPosition's latency learning reads two identical fires as a CONFIRMED min-gap, poisoning
     ' LiveEdgeMs for any live test that runs after another test in the suite.
-    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control", "globalCaptionMode"]
+    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control", "globalCaptionMode", "playbackSpeed"]
         m.top.unobserveField(deviceField)
     end for
     m.top.globalCaptionMode = "Off"
@@ -138,6 +142,9 @@ function TestSetLive(edgeMs as integer) as void
     m.trickPlayBar.isLive = true
     m.trickPlayBar.canRewind = m.transport.CanRewindLive()
     m.transport.OnLiveEdge(edgeMs)
+    ' The live controller deliberately requires two agreeing samples before learning inherent stream latency.
+    ' Establish a zero-gap baseline so a later behind-edge sample is modeled as DVR offset, not startup latency.
+    m.transport.OnPosition(edgeMs)
     m.transport.OnPosition(edgeMs)
     SyncFocus()
 end function
@@ -160,6 +167,37 @@ function TestSaveQuality(value as string) as void
     end if
     m.qualitySelector.value = value
     m.qualitySelector.save = true
+end function
+
+function TestOpenQualityFromPanel() as void
+    if m.playbackSettingsPanel <> invalid
+        m.playbackSettingsPanel.requestQuality = true
+    end if
+end function
+
+function TestSetPlaybackSpeed(value as string) as void
+    if m.playbackSettingsPanel <> invalid
+        m.playbackSettingsPanel.speedChanged = value
+    end if
+end function
+
+function TestResetPlaybackSpeedForNewContent() as void
+    ResetCurrentPlaybackSpeed()
+end function
+
+function TestClosePlaybackSettings() as void
+    if m.playbackSettingsPanel <> invalid
+        m.playbackSettingsPanel.closed = true
+    end if
+end function
+
+function TestSetChapters(chapters as object, durationSeconds as float) as void
+    ' Each seam test shares this SceneGraph node. Make this helper establish VOD state explicitly so a prior
+    ' live test cannot keep the renderer's live-only marker suppression enabled.
+    m.trickPlayBar.isLive = false
+    m.top.duration = durationSeconds
+    m.trickPlayBar.durationMs = Int(durationSeconds * 1000)
+    m.trickPlayBar.chapters = chapters
 end function
 
 function TestCloseQuality() as void
@@ -265,13 +303,17 @@ function TestSnapshot() as object
         focusedButton: m.focusedButton
         statsEnabled: m.statsEnabled
         statsOverlayPresent: m.statsForNerds <> invalid
+        playbackSettingsPresent: m.playbackSettingsPanel <> invalid
         qualitySelectorPresent: m.qualitySelector <> invalid
         qualityPreference: m.top.preferences["playback.preferred_quality"]
         qualityLabel: m.buttonRow.qualityLabel
+        speedPreference: m.top.preferences["playback.preferred_speed"]
+        speedOverride: m.currentPlaybackSpeedOverride
+        playbackSpeed: m.top.playbackSpeed
+        speedLabel: m.buttonRow.speedLabel
+        focusedLabel: m.buttonRow.focusedLabel
         previousDisabled: m.buttonRow.findNode("PreviousButton").disabled
         nextDisabled: m.buttonRow.findNode("NextButton").disabled
-        skipBackDisabled: m.buttonRow.findNode("SkipBackButton").disabled
-        skipForwardDisabled: m.buttonRow.findNode("SkipForwardButton").disabled
         bookmarkAvailable: m.bookmarkAvailable
         bookmarked: m.bookmarked
         bookmarkDisabled: m.buttonRow.findNode("BookmarkButton").disabled
@@ -284,6 +326,8 @@ function TestSnapshot() as object
         forceLiveBadge: m.trickPlayBar.forceLiveBadge
         liveBadgeShown: m.trickPlayBar.findNode("liveLabel").visible
         barRemainingText: m.trickPlayBar.findNode("remainingLabel").text
+        goLiveVisible: m.trickPlayBar.findNode("goLiveAction").visible
+        chapterMarkerCount: m.trickPlayBar.findNode("chapterMarkers").getChildCount()
     }
 end function
 

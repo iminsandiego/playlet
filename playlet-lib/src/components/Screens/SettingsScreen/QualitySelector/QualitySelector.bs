@@ -20,6 +20,7 @@ function Init()
 
     m.saveButton.observeField("buttonSelected", FuncName(OnSaveButtonSelected))
     m.closeButton.observeField("buttonSelected", FuncName(Close))
+    m.checkList.observeField("navKey", FuncName(OnCheckListNav))
     m.saveButton.observeField("navKey", FuncName(OnActionButtonNav))
     m.closeButton.observeField("navKey", FuncName(OnActionButtonNav))
     m.embeddedCloseTimer.observeField("fire", FuncName(OnEmbeddedCloseTimer))
@@ -79,9 +80,10 @@ function OnFocusChange() as void
         return
     end if
 
-    ' Roku's native CheckList consumes every key at its focus boundary, so a modal that starts in the list
-    ' cannot reach Save/Close. Start on Save; Up enters the list, and a changed value returns here.
-    NodeSetFocus(m.saveButton, true)
+    ' Always open on Auto so the vertical list and its navigation direction are immediately obvious.
+    m.checkList.itemFocused = 0
+    m.checkList.jumpToItem = 0
+    NodeSetFocus(m.checkList, true)
 end function
 
 function OnKeyEvent(key as string, press as boolean) as boolean
@@ -91,9 +93,7 @@ function OnKeyEvent(key as string, press as boolean) as boolean
 
     if key = RemoteKeys.Options
         if m.top.embedded
-            ' Native CheckList consumes every direction, including at its edges, so the configured navigation
-            ' cannot leave it. Native buttons also consume their horizontal boundaries, so Options is the
-            ' explicit Save/Close toggle and must not minimize the video underneath this modal.
+            ' Options remains a quick Save/Close toggle and must not minimize the video underneath this modal.
             if m.closeButton.isInFocusChain()
                 NodeSetFocus(m.closeButton, false)
                 NodeSetFocus(m.saveButton, true)
@@ -145,13 +145,13 @@ function OnValueChange() as void
     ' (the interactive shortcut that intentionally selects every manual quality).
     m.lastCheckedState = checkedState
     m.checkList.checkedState = checkedState
-    FocusEmbeddedActions()
 end function
 
-function FocusEmbeddedActions() as void
-    if not m.top.embedded or not m.top.focus or not m.checkList.isInFocusChain()
+function OnCheckListNav(event as object) as void
+    if ValidString(event.GetData()) <> RemoteKeys.Down
         return
     end if
+
     NodeSetFocus(m.checkList, false)
     NodeSetFocus(m.saveButton, true)
 end function

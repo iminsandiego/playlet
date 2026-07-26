@@ -1,0 +1,21 @@
+import "pkg:/source/utils/RemoteKeys.bs"
+
+' CheckList consumes Down even when the final item is focused, so its configured navigation never receives
+' the boundary key. Publish that one boundary explicitly; ordinary list navigation remains native.
+function OnKeyEvent(key as string, press as boolean) as boolean
+    if not press or key <> RemoteKeys.Down
+        return false
+    end if
+
+    content = m.top.content
+    if content = invalid or content.getChildCount() = 0
+        return false
+    end if
+
+    if m.top.itemFocused < content.getChildCount() - 1
+        return false
+    end if
+
+    m.top.navKey = key
+    return true
+end function

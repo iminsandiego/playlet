@@ -1,0 +1,27 @@
+<component name="PlaybackSettingsPanel" extends="Group" includes="Focus">
+    <interface>
+        <field id="qualityLabel" type="string" value="" onChange="Repaint" />
+        <field id="speedValue" type="string" value="1.0" onChange="OnSpeedValueChange" />
+        <field id="speedDefaultValue" type="string" value="1.0" onChange="Repaint" />
+        <field id="speedEnabled" type="boolean" value="true" onChange="Repaint" />
+        <field id="requestQuality" type="boolean" alwaysNotify="true" />
+        <field id="speedChanged" type="string" alwaysNotify="true" />
+        <field id="closed" type="boolean" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Timer id="closeTimer" duration="0.01" repeat="false" />
+        <Rectangle width="1280" height="720" color="#000000" opacity="0.62" />
+        <Rectangle width="700" height="380" translation="[290,170]" color="#242424">
+            <Label id="titleLabel" translation="[55,35]" width="590" height="48"
+                text="Playback settings" color="0xFEFEFEFF" horizAlign="left" vertAlign="center">
+                <Font role="font" uri="font:BoldSystemFontFile" size="34" />
+            </Label>
+            <PlaybackSettingsActionButton id="qualityButton"
+                iconVisible="false" minWidth="590" height="64" translation="[55,105]" />
+            <PlaybackSettingsActionButton id="speedButton"
+                iconVisible="false" minWidth="590" height="64" translation="[55,187]" />
+            <PlaybackSettingsActionButton id="playbackSettingsCloseButton"
+                iconVisible="false" text="Close" minWidth="180" height="58" translation="[260,277]" />
+        </Rectangle>
+    </children>
+</component>

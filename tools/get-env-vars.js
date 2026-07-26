@@ -10,7 +10,7 @@ function getEnvVars(requiredVars = undefined) {
     let envVars = process.env;
     if (fs.existsSync(envFile)) {
         const envConfig = dotenv.parse(fs.readFileSync(envFile));
-        envVars = { ...envVars, ...envConfig };
+        envVars = { ...envConfig, ...envVars };
     }
     if (requiredVars) {
         const missingVars = requiredVars.filter((key) => !envVars[key]);
