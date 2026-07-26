@@ -34,7 +34,7 @@ function getEnvVars(requiredVars: string[] = []): Record<string, string> {
     let envVars: Record<string, string | undefined> = { ...process.env };
     if (fs.existsSync(envFile)) {
         const envConfig = dotenv.parse(fs.readFileSync(envFile));
-        envVars = { ...envVars, ...envConfig };
+        envVars = { ...envConfig, ...envVars };
     }
     const missingVars = requiredVars.filter((key) => !envVars[key]);
     if (missingVars.length) {
@@ -43,4 +43,3 @@ function getEnvVars(requiredVars: string[] = []): Record<string, string> {
     // every required var is validated present above; absent optional keys are simply not read.
     return envVars as Record<string, string>;
 }
-

@@ -1,0 +1,54 @@
+import "pkg:/source/utils/RemoteKeys.bs"
+
+namespace Tests
+
+    @SGNode("PlaybackSpeedSelectorTestHarness")
+    @suite
+    class PlaybackSpeedSelectorTests extends Rooibos.BaseTestSuite
+
+        protected override function beforeEach()
+            m.top.options = [
+                { displayText: "0.5x", value: "0.5" }
+                { displayText: "1x", value: "1.0" }
+                { displayText: "1.5x", value: "1.5" }
+            ]
+            m.top.embedded = true
+            m.top.save = false
+            m.top.closed = false
+            m.top.value = "1.0"
+            m.top.focus = true
+        end function
+
+        @describe("modal selection behavior")
+
+        @it("shows one compact list and saves the selected speed")
+        function _()
+            m.assertEqual(m.top.findNode("title").text, "Default playback speed")
+            speedList = m.top.findNode("speedList")
+            m.assertEqual(speedList.content.getChildCount(), 3)
+            m.assertEqual(speedList.checkedItem, 1)
+            m.assertEqual(speedList.itemFocused, 1)
+
+            speedList.checkedItem = 2
+            m.assertTrue(m.top.save)
+            m.assertEqual(m.top.value, "1.5")
+            m.assertFalse(m.top.closed, "close is deferred until the activating key unwinds")
+
+            m.top.callFunc("TestCompleteClose")
+            m.assertTrue(m.top.closed)
+            m.assertFalse(m.top.focus)
+        end function
+
+        @it("back closes without changing or saving the preference")
+        function _()
+            m.assertTrue(m.top.callFunc("TestKey", RemoteKeys.Back, true))
+            m.top.callFunc("TestCompleteClose")
+
+            m.assertFalse(m.top.save)
+            m.assertEqual(m.top.value, "1.0")
+            m.assertTrue(m.top.closed)
+        end function
+
+    end class
+
+end namespace

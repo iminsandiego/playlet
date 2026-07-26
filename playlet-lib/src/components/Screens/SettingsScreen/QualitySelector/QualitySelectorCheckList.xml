@@ -1,0 +1,5 @@
+<component name="QualitySelectorCheckList" extends="CheckList">
+    <interface>
+        <field id="navKey" type="string" alwaysNotify="true" />
+    </interface>
+</component>

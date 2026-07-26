@@ -90,6 +90,16 @@ namespace Tests
             m.assertEqual(clip.y, 282.0) ' row 2 -> cellY = 2*141
         end function
 
+        @it("uses the storyboard frame nearest an off-grid transport cursor")
+        function _()
+            m.top.transportMode = TransportController.Mode.Scrub
+            m.top.cursorMs = 5500 ' 2s tiles: nearest is tile 3 at 6s, not tile 2 at 4s
+            centerTile = m.top.findNode("bifTileC")
+            clip = centerTile.clippingRect
+            m.assertEqual(clip.x, 912.0) ' center preview uses 304px cells: tile 3 -> col 3
+            m.assertEqual(clip.y, 0.0)
+        end function
+
         @it("at the START edge HIDES the two left tiles (first frame sits in the middle)")
         function _()
             m.top.transportMode = TransportController.Mode.Scrub

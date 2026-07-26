@@ -15,7 +15,7 @@ namespace TransportController
 
     enum Mode
         Idle = 0 ' normal playback
-        Scrub = 1 ' VOD step-seek (Left/Right): frozen, cursor steps the storyboard grid
+        Scrub = 1 ' VOD step-seek (Left/Right): frozen, cursor steps a fixed 10 seconds
         Scan = 2 ' VOD free-run ladder (Fwd/Rev)
         LiveDvr = 3 ' live rewind/forward inside the DVR window
     end enum
@@ -35,14 +35,12 @@ namespace TransportController
 
     enum Command
         None = 0
-        Left = 1 ' VOD scrub back / live rewind -5s
-        Right = 2 ' VOD scrub ahead / live forward +5s
+        Left = 1 ' VOD/live scrub back -10s
+        Right = 2 ' VOD/live scrub ahead +10s
         Rev = 3 ' VOD scan reverse / live rewind
         Fwd = 4 ' VOD scan forward / live continuous forward preview
         Replay = 5 ' InstantReplay -20s
         Commit = 6 ' Select/OK or Play: seek-to-cursor + resume (when a transport is active)
-        SkipBack10 = 7 ' VOD one-shot -10s seek, preserving the current play/pause state
-        SkipAhead10 = 8 ' VOD one-shot +10s seek, preserving the current play/pause state
     end enum
 
     enum Control
@@ -66,7 +64,7 @@ namespace TransportController
 
     const SCRUB_REPEAT_INITIAL_MS = 510
     const SCRUB_REPEAT_MS = 120
-    ' Hold-to-seek acceleration. A held Left/Right steps the flat storyboard grid for the first
+    ' Hold-to-seek acceleration. A held Left/Right steps the flat 10-second base for the first
     ' RAMP_DELAY ticks — a fine-adjust window before speed builds — then each tick grows the step by
     ' 1/RAMP_DIVISOR of its remaining gap to the cap: an exponential approach to a terminal velocity.
     ' The cap, CAP_SQRT_COEFF * sqrt(durationMs) per tick, scales with the SQUARE ROOT of the duration,
@@ -77,7 +75,10 @@ namespace TransportController
     const SCRUB_HOLD_CAP_SQRT_COEFF = 61
     const SCAN_LEVEL_MIN = 1
     const SCAN_LEVEL_MAX = 3
-    const LIVE_DVR_STEP_MS = 5000
+    ' User-facing VOD transport is fixed. Storyboard cadence is publisher/video metadata and varies (the same
+    ' queue can legitimately contain 5s and 10s thumbnail grids), so it must never define seek distance.
+    const VOD_SEEK_STEP_MS = 10000
+    const LIVE_DVR_STEP_MS = 10000
     const LIVE_EDGE_SEEK_MS = 999999000 ' seek target that means "jump to the live edge"
     ' Video.position is single-precision, so the 999999s sentinel echoes back as 999998.976s and
     ' Int(position * 1000) lands 24ms UNDER the constant. Sentinel checks take this slack — nothing
@@ -88,11 +89,15 @@ namespace TransportController
     ' tail resolution resumes at least this far above the floor so the resumed playhead isn't
     ' immediately overtaken again.
     const LIVE_TAIL_RESUME_MARGIN_MS = 30000
-    ' Live scan base scales with DVR window length: base = effectiveEdge / DIVISOR, floored at the storyboard
-    ' interval so short DVRs are unchanged. 4000 -> ~10.8s base on a 12h DVR -> L3 ~65s/tick.
+    ' Live scan base scales with DVR window length: base = effectiveEdge / DIVISOR, floored at the fixed
+    ' 10-second transport step. 4000 -> ~10.8s base on a 12h DVR -> L3 ~65s/tick.
     const LIVE_SCAN_BASE_DIVISOR = 4000
     const REPLAY_BACK_MS = 20000
-    const SKIP_10_SECONDS_MS = 10000
+    const SEEK_TARGET_TOLERANCE_MS = 3000
+    ' After one sample reaches the seek target, playback can advance beyond the target tolerance before Roku's
+    ' next ~1s position notification (especially at 1.5x/2x). Accept that next bounded forward sample as the
+    ' stable-landing confirmation while still rejecting an old playhead far beyond a backward-seek target.
+    const SEEK_SETTLE_MAX_ADVANCE_MS = 10000
     ' A VOD commit landing within this of the duration means "watched to the end" -> finish (PlayNext/close),
     ' not a seek into the last instants (which just re-buffers and fights the device's EOF auto-resume).
     ' Matches the SponsorBlock finish rule (SkipTargetForSegment).
@@ -117,12 +122,12 @@ namespace TransportController
         return ms >= TransportController.LIVE_EDGE_SEEK_MS - TransportController.LIVE_EDGE_SENTINEL_SLACK_MS
     end function
 
-    ' The hold-seek per-tick step cap (see the SCRUB_HOLD_* constants). Floors at the storyboard step
-    ' so a short or unknown duration keeps the flat grid step.
-    function ScrubHoldCapMs(durationMs as integer, storyboardStepMs as integer) as integer
+    ' The hold-seek per-tick step cap (see the SCRUB_HOLD_* constants). Floors at the fixed VOD step
+    ' so a short or unknown duration keeps the flat 10-second step.
+    function ScrubHoldCapMs(durationMs as integer, baseStepMs as integer) as integer
         cap = Int(TransportController.SCRUB_HOLD_CAP_SQRT_COEFF * Sqr(durationMs))
-        if cap < storyboardStepMs
-            return storyboardStepMs
+        if cap < baseStepMs
+            return baseStepMs
         end if
         return cap
     end function
@@ -132,7 +137,7 @@ namespace TransportController
         ' ---- content facts (set once at contentReady) ----
         isLive as boolean = false
         private hasStoryboards as boolean = false
-        storyboardStepMs as integer = 2000 ' VOD per-tap step + scan base (storyboard L2 interval)
+        storyboardStepMs as integer = 2000 ' visual-only storyboard L2 interval; never a transport distance
         ' Live DVR window length (0 = unknown). The generated DASH anchors t=0 to the window start, so the
         ' rewind floor is edge - window once the session outlives the window (content below it has expired).
         private dvrWindowMs as integer = 0
@@ -169,7 +174,7 @@ namespace TransportController
         scanDir as integer = 0
         scrubHeldDir as integer = 0
         scrubHoldTicks as integer = 0 ' consecutive hold-repeat ticks of the current hold (drives the accel ramp)
-        scrubStepMs as integer = 2000 ' current per-step size: storyboardStepMs until the hold ramp grows it
+        scrubStepMs as integer = 10000 ' current per-step size: fixed VOD step until the hold ramp grows it
         edgeMs as integer = 0 ' the live edge, fed by OnLiveEdge (the coordinator's wall-clock computation)
         ' Inherent live latency: the smallest CONFIRMED (edge - position) observed this content — the closest
         ' we have ever been IS how close this stream can get. The offset reads relative to it, so steady
@@ -180,10 +185,14 @@ namespace TransportController
         private liveMinCandidateMs as integer = -1
         replayPending as boolean = false ' an InstantReplay seek is in flight (position hasn't reached it yet)
         private replayTargetMs as integer = 0 ' the last InstantReplay target; spamming replay accumulates from THIS
-        ' A keep-playing/resume seek is in flight and has NOT yet reached "playing". While true, a new transport
+        ' A keep-playing/resume seek is in flight and has NOT yet stably landed. While true, a new transport
         ' must NOT slam control=pause: a pause landing mid-seek wedges the Video (buffering<->paused, esp. near
-        ' EOF). Set on every non-pause seek emit; cleared by MarkSeekSettled when the device reaches playing.
+        ' EOF). Roku can emit a transient "playing" edge before the seek is stable, so settle only after two
+        ' consecutive playing-position samples reach the target.
         seekSettling as boolean = false
+        private seekTargetMs as integer = 0
+        private seekTargetSamples as integer = 0
+        private seekLandingMs as integer = 0
 
         ' ------------------------------------------------------------------------------------------------
         ' Content / live inputs
@@ -195,7 +204,7 @@ namespace TransportController
                 m.storyboardStepMs = storyboardStepMs
             end if
             m.scrubHoldTicks = 0 ' new content -> a fresh hold ramp
-            m.scrubStepMs = m.storyboardStepMs
+            m.scrubStepMs = TransportController.VOD_SEEK_STEP_MS
             m.dvrWindowMs = 0 ' new content -> unknown window until SetLiveDvrWindow
             m.edgeMs = 0
             m.liveMinGapMs = -1 ' new content -> re-learn the inherent latency
@@ -203,6 +212,10 @@ namespace TransportController
             m.atLiveEdge = true
             m.replayPending = false ' new content -> no replay seek in flight
             m.replayTargetMs = 0
+            m.seekSettling = false
+            m.seekTargetMs = 0
+            m.seekTargetSamples = 0
+            m.seekLandingMs = 0
         end function
 
         ' Live DVR window length (ms); 0/negative = unknown (the rewind floor stays at 0).
@@ -251,17 +264,12 @@ namespace TransportController
             return m.LiveFloorMs()
         end function
 
-        ' Storyboards arrive late (the native Video.thumbnailTiles field populates after the manifest loads),
-        ' so the coordinator updates the scrub step + bif gate here without the live-edge / replay resets that
-        ' SetContent does for new content.
+        ' Storyboards arrive late (the native Video.thumbnailTiles field populates after the manifest loads).
+        ' Their interval drives only BIF image selection; transport stays at the fixed VOD step.
         function UpdateStoryboards(storyboardStepMs as integer, hasStoryboards as boolean) as void
             m.hasStoryboards = hasStoryboards
             if storyboardStepMs > 0
                 m.storyboardStepMs = storyboardStepMs
-            end if
-            ' a grown grid step raises the hold-step floor (a mid-hold ramp above it just keeps its speed).
-            if m.scrubStepMs < m.storyboardStepMs
-                m.scrubStepMs = m.storyboardStepMs
             end if
         end function
 
@@ -269,20 +277,43 @@ namespace TransportController
             m.ready = true
         end function
 
-        ' Called when the Video reaches state="playing": the in-flight play-through seek has landed, so a later
-        ' transport may freeze immediately again.
-        function MarkSeekSettled() as void
-            m.seekSettling = false
-        end function
-
-
         ' Last real Video position. While idle the cursor tracks it; while a transport is active the machine owns
-        ' the cursor. Drops the live-edge seek sentinel echo (see OnDuration).
+        ' the cursor. Position events flow only while playing, so two target-matching samples are a stronger
+        ' landing signal than Roku's transient playing state edge. Drops the live-edge seek sentinel echo
+        ' (see OnDuration).
         function OnPosition(ms as integer) as void
             if m.isLive and TransportController.IsLiveEdgeSentinelMs(ms)
                 return
             end if
             m.positionMs = ms
+            if m.seekSettling
+                if m.seekTargetSamples = 0
+                    if m.seekTargetMs < 0
+                        ' A live-edge seek uses an OS sentinel rather than a timeline target. Compare the first
+                        ' sample to the moving effective edge so stale pre-edge ticks cannot start confirmation.
+                        targetReached = Abs(ms - m.LiveEdgeMs()) <= TransportController.LIVE_EDGE_ATEDGE_LEAVE_MS
+                    else
+                        targetReached = Abs(ms - m.seekTargetMs) < TransportController.SEEK_TARGET_TOLERANCE_MS
+                    end if
+                    if targetReached
+                        m.seekTargetSamples = 1
+                        m.seekLandingMs = ms
+                    end if
+                else
+                    ' The first sample proved the target was reached. The next normal forward-playing sample
+                    ' proves it was not a one-frame optimistic edge, even if playback speed carried it beyond
+                    ' the original target window before this notification arrived.
+                    followupReached = ms >= m.seekLandingMs and ms - m.seekLandingMs <= TransportController.SEEK_SETTLE_MAX_ADVANCE_MS
+                    if followupReached
+                        m.seekSettling = false
+                        m.seekTargetSamples = 0
+                        m.seekLandingMs = 0
+                    else
+                        m.seekTargetSamples = 0
+                        m.seekLandingMs = 0
+                    end if
+                end if
+            end if
             ' a pending InstantReplay seek has landed once position reaches its target -> stop accumulating.
             if m.replayPending and Abs(ms - m.replayTargetMs) < 3000
                 m.replayPending = false
@@ -325,7 +356,7 @@ namespace TransportController
             m.durationMs = ms
             m.ClampIdleCursor()
             ' a duration that regresses mid-hold can leave the ramped step above the new cap — re-clamp.
-            cap = TransportController.ScrubHoldCapMs(m.durationMs, m.storyboardStepMs)
+            cap = TransportController.ScrubHoldCapMs(m.durationMs, TransportController.VOD_SEEK_STEP_MS)
             if m.scrubStepMs > cap
                 m.scrubStepMs = cap
             end if
@@ -406,14 +437,6 @@ namespace TransportController
                 m.Replay()
                 return
             end if
-            if command = TransportController.Command.SkipBack10
-                m.SeekBy(-TransportController.SKIP_10_SECONDS_MS)
-                return
-            end if
-            if command = TransportController.Command.SkipAhead10
-                m.SeekBy(TransportController.SKIP_10_SECONDS_MS)
-                return
-            end if
             if m.isLive
                 ' a non-rewindable live stream (DVR window is just the buffer) takes no transport input.
                 if not m.CanRewindLive()
@@ -441,47 +464,15 @@ namespace TransportController
             end if
         end function
 
-        ' VOD-only one-shot relative seek for the dedicated -10/+10 controls. Unlike scrub/scan, this does not
-        ' enter a preview transport or change playback state: control=None lets a playing video keep playing and
-        ' lets the coordinator's existing re-pause-after-seek seam restore a paused video after Roku's implicit
-        ' seek resume. Buttons exist only in idle, so active transports reject the command instead of silently
-        ' changing their cursor/commit semantics. Live has its own moving-edge/DVR preview model and rejects this
-        ' fixed VOD seek; callers should use Left/Right/Rev/Fwd for live until the live button UX is specified.
-        function SeekBy(deltaMs as integer) as boolean
-            if not m.ready or m.isLive or m.transportMode <> TransportController.Mode.Idle
-                return false
-            end if
-            if m.durationMs <= 0 or deltaMs = 0
-                return false
-            end if
-
-            target = m.Clamp(m.positionMs + deltaMs, 0, m.durationMs)
-            if target = m.positionMs
-                return false
-            end if
-
-            ' A new explicit seek breaks rapid InstantReplay accumulation and clears its idle toast.
-            m.replayPending = false
-            m.replayTargetMs = 0
-            m.glyph = TransportController.Glyph.None
-            m.StopTimer(TransportController.Timer.ReplayToast)
-
-            ' Optimistic projection avoids an idle-bar snap-back while the seek is in flight (same as Commit).
-            m.positionMs = target
-            m.cursorMs = target
-            m.EmitIntent(TransportController.Control.None, true, target)
-            return true
-        end function
-
         ' ------------------------------------------------------------------------------------------------
-        ' SCRUB (VOD Left/Right) — first tap freezes + snaps the cursor to the grid; hold repeats.
+        ' SCRUB (VOD Left/Right) — first tap freezes and moves a fixed 10s; hold repeats.
         ' ------------------------------------------------------------------------------------------------
         function EnterScrub(dir as integer) as void
             firstEnter = (m.transportMode <> TransportController.Mode.Scrub)
             if firstEnter
                 if m.transportMode = TransportController.Mode.Idle
                     m.FreezeForTransport() ' the video FREEZES (deferred if a play-through seek is still settling)
-                    m.cursorMs = m.SnapToGrid(m.positionMs, m.storyboardStepMs)
+                    m.cursorMs = m.positionMs
                 end if
                 m.transportMode = TransportController.Mode.Scrub
                 m.scanLevel = 0
@@ -490,7 +481,7 @@ namespace TransportController
             end if
             m.scrubHeldDir = dir
             m.scrubHoldTicks = 0 ' every fresh press restarts the accel ramp: a tap always steps the flat grid
-            m.scrubStepMs = m.storyboardStepMs
+            m.scrubStepMs = TransportController.VOD_SEEK_STEP_MS
             if dir < 0
                 m.glyph = TransportController.Glyph.SkipBack
             else
@@ -512,7 +503,7 @@ namespace TransportController
             if m.scrubHoldTicks <= TransportController.SCRUB_HOLD_RAMP_DELAY_TICKS
                 return
             end if
-            cap = TransportController.ScrubHoldCapMs(m.durationMs, m.storyboardStepMs)
+            cap = TransportController.ScrubHoldCapMs(m.durationMs, TransportController.VOD_SEEK_STEP_MS)
             if m.scrubStepMs >= cap
                 m.scrubStepMs = cap
                 return
@@ -562,13 +553,24 @@ namespace TransportController
         end function
 
         ' ------------------------------------------------------------------------------------------------
-        ' LIVE DVR — Left/Rev = frozen VOD-scrub-shaped rewind (FREEZE, step -5s, hold repeats, NO per-press
-        ' seek); Right = +5s toward the edge (reaching it auto-resumes); Fwd = continuous forward preview that
+        ' LIVE DVR — Left/Rev = frozen VOD-scrub-shaped rewind (FREEZE, step -10s, hold repeats, NO per-press
+        ' seek); Right = +10s toward the edge (reaching it auto-resumes); Fwd = continuous forward preview that
         ' auto-resumes at the edge. Offset = (edge - cursor) - baseline, counts up while frozen.
         ' ------------------------------------------------------------------------------------------------
         function EnterLiveDvr() as boolean
             if m.transportMode = TransportController.Mode.LiveDvr
                 return false
+            end if
+            ' A user can rewind before two playing-position samples have calibrated the stream latency. Freeze
+            ' the current edge-to-position gap as the baseline at that boundary; otherwise the position samples
+            ' emitted after the committed rewind can be mistaken for inherent latency and absorb the rewind,
+            ' incorrectly restoring "LIVE" and hiding the Go Live action.
+            if m.liveMinGapMs < 0
+                m.liveMinGapMs = m.edgeMs - m.positionMs
+                if m.liveMinGapMs < 0
+                    m.liveMinGapMs = 0
+                end if
+                m.liveMinCandidateMs = -1
             end if
             m.cursorMs = m.positionMs
             m.transportMode = TransportController.Mode.LiveDvr
@@ -642,6 +644,16 @@ namespace TransportController
             m.RecomputeLive()
             m.EmitIntent(TransportController.Control.Resume, true, TransportController.LIVE_EDGE_SEEK_MS)
             m.commitSeq = m.commitSeq + 1
+        end function
+
+        ' Contextual idle-bar action: jump directly back to the live edge. Returns false when the action is
+        ' unavailable so the coordinator can retain the normal live OK/chrome behavior.
+        function GoLive() as boolean
+            if not m.ready or not m.isLive or m.transportMode <> TransportController.Mode.Idle or m.atLiveEdge
+                return false
+            end if
+            m.CommitToLiveEdge()
+            return true
         end function
 
         ' The sliding DVR tail overtook the frozen playhead (SafetyAction.ResumeLiveTail): the device
@@ -800,7 +812,7 @@ namespace TransportController
             m.scanDir = 0
             m.scrubHeldDir = 0
             m.scrubHoldTicks = 0
-            m.scrubStepMs = m.storyboardStepMs
+            m.scrubStepMs = TransportController.VOD_SEEK_STEP_MS
             m.StopTimer(TransportController.Timer.ScrubRepeat)
             m.StopTimer(TransportController.Timer.Scan)
             m.cursorMs = m.positionMs
@@ -828,7 +840,10 @@ namespace TransportController
         ' brain so the device never diverges: reset to idle and emit the seek as a normal intent. keepPlaying
         ' preserves the current play state (control=none); else resume.
         function ForceIdleSeek(targetMs as integer, keepPlaying as boolean) as void
-            m.ResetToIdle()
+            ' Project the requested target immediately, just like Commit: a transport entered before the device
+            ' lands must preview from the destination, not jump back to the stale pre-seek position.
+            m.positionMs = targetMs
+            m.ResetToIdle() ' seeds cursorMs from the optimistic target above
             control = TransportController.Control.Resume
             if keepPlaying
                 control = TransportController.Control.None
@@ -913,9 +928,16 @@ namespace TransportController
                 seq: m.intentSeq
             }
             ' a non-pause seek is in flight toward "playing" -> mark it settling so a transport entered before it
-            ' lands defers its freeze. A pause+seek is already paused and can't wedge, so it skips the guard.
+            ' stably lands defers its freeze. A pause+seek is already paused and can't wedge, so it skips the guard.
             if hasSeek and control <> TransportController.Control.Pause
                 m.seekSettling = true
+                if TransportController.IsLiveEdgeSentinelMs(seekMs)
+                    m.seekTargetMs = -1 ' compare against the moving effective edge in OnPosition
+                else
+                    m.seekTargetMs = seekMs
+                end if
+                m.seekTargetSamples = 0
+                m.seekLandingMs = 0
             end if
         end function
 
@@ -943,18 +965,10 @@ namespace TransportController
             return value
         end function
 
-        ' Snap a position down to the storyboard grid (the cursor enters scrub on an even step boundary).
-        function SnapToGrid(ms as integer, stepMs as integer) as integer
-            if stepMs <= 0
-                return ms
-            end if
-            return (ms \ stepMs) * stepMs
-        end function
-
         function ScanJumpMs(level as integer) as integer
-            ' base = the storyboard tile interval; on LIVE it also scales with the DVR window (effectiveEdge /
-            ' DIVISOR), floored at the storyboard interval. Levels multiply 1:3:6.
-            base = m.storyboardStepMs
+            ' Fast Forward/Rewind uses the same fixed 10-second base as Left/Right on both VOD and live.
+            ' Very long live DVR windows may raise that base; levels multiply the selected base 1:3:6.
+            base = TransportController.VOD_SEEK_STEP_MS
             if m.isLive
                 ' scale with the REWINDABLE span (edge - floor), not the absolute timeline position.
                 windowBase = (m.LiveEdgeMs() - m.LiveFloorMs()) \ TransportController.LIVE_SCAN_BASE_DIVISOR

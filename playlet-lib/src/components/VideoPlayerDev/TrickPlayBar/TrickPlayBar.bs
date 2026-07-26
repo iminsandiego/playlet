@@ -19,21 +19,37 @@ function Init()
     m.remainingLabel = m.top.findNode("remainingLabel")
     m.bullet = m.top.findNode("bullet")
     m.liveLabel = m.top.findNode("liveLabel")
+    m.chapterMarkers = m.top.findNode("chapterMarkers")
+    m.goLiveAction = m.top.findNode("goLiveAction")
+    m.goLiveLabel = m.top.findNode("goLiveLabel")
 
     ' translated once: code-assigned strings don't get the automatic XML lookup.
     m.rewindLiveText = Tr(Locale.VideoPlayer.RewindLiveTv)
+    m.goLiveLabel.text = Tr(Locale.VideoPlayer.GoLive)
     ' the ● LIVE badge is right-aligned to the track end on first show (the translated text width varies by
     ' language — "EN DIRECT" is far wider than "LIVE"); measured lazily, once.
     m.liveBadgeLaidOut = false
 
-    for each field in ["transportMode", "positionMs", "durationMs", "cursorMs", "isLive", "canRewind", "liveOffsetMs", "atLiveEdge", "forceLiveBadge"]
+    for each field in ["transportMode", "positionMs", "cursorMs", "canRewind", "liveOffsetMs", "atLiveEdge", "forceLiveBadge"]
         m.top.ObserveField(field, FuncName(Repaint))
+    end for
+    for each field in ["durationMs", "isLive"]
+        m.top.ObserveField(field, FuncName(OnTimelineShapeChange))
+    end for
+    for each field in ["chapters", "showChapterMarkers"]
+        m.top.ObserveField(field, FuncName(RenderChapterMarkers))
     end for
     m.top.ObserveField("focused", FuncName(OnFocusChange))
     m.top.ObserveField("glyph", FuncName(OnGlyph))
     m.top.ObserveField("sbFillBlend", FuncName(OnSbFillBlend))
 
     Repaint()
+    RenderChapterMarkers()
+end function
+
+function OnTimelineShapeChange() as void
+    Repaint()
+    RenderChapterMarkers()
 end function
 
 function Repaint() as void
@@ -75,6 +91,7 @@ function RenderVodBar() as void
 
     m.bullet.visible = false
     m.liveLabel.visible = false
+    m.goLiveAction.visible = false
 end function
 
 function RenderLiveBar() as void
@@ -130,6 +147,7 @@ function RenderLiveBar() as void
         m.bullet.visible = false
         m.liveLabel.visible = false
     end if
+    RenderGoLiveAction()
 end function
 
 ' Raise (screen-center, under the bif) or rest (low) the handle that carries the scanGlyph. The focus
@@ -156,6 +174,41 @@ function OnFocusChange() as void
     m.playheadFocusScale.reverse = not m.top.focused
     m.playheadFocus.control = "stop"
     m.playheadFocus.control = "start"
+    RenderGoLiveAction()
+end function
+
+function RenderGoLiveAction() as void
+    m.goLiveAction.visible = m.top.isLive and m.top.transportMode = TransportController.Mode.Idle and not m.top.atLiveEdge and m.top.focused
+end function
+
+function RenderChapterMarkers() as void
+    m.chapterMarkers.RemoveChildrenIndex(m.chapterMarkers.GetChildCount(), 0)
+    chapters = m.top.chapters
+    durationMs = m.top.durationMs
+    if not m.top.showChapterMarkers or m.top.isLive or not IsArray(chapters) or chapters.Count() < 2 or durationMs <= 0
+        return
+    end if
+
+    for i = 0 to chapters.Count() - 1
+        chapter = chapters[i]
+        if not IsAssociativeArray(chapter)
+            continue for
+        end if
+        startMs = ValidInt(chapter.startMs)
+        ' The first chapter starts at the track edge and does not need a divider.
+        if startMs <= 0 or startMs >= durationMs
+            continue for
+        end if
+        x = (startMs / (durationMs * 1.0)) * 1144
+        marker = CreateObject("roSGNode", "Rectangle")
+        marker.id = "chapterMarker" + i.ToStr()
+        marker.width = 2
+        marker.height = 12
+        marker.color = "#EBEBEBFF"
+        marker.opacity = 0.72
+        marker.translation = [x - 1, 0]
+        m.chapterMarkers.AppendChild(marker)
+    end for
 end function
 
 function OnGlyph() as void

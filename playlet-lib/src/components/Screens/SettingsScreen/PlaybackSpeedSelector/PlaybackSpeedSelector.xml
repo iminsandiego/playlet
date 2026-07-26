@@ -1,0 +1,39 @@
+<component name="PlaybackSpeedSelector" extends="Group" includes="AutoBind,Focus">
+    <interface>
+        <field id="value" type="string" onChange="OnValueChange" />
+        <field id="options" type="array" onChange="OnOptionsChange" />
+        <field id="save" type="boolean" alwaysNotify="true" />
+        <field id="embedded" type="boolean" value="false" />
+        <field id="closed" type="boolean" alwaysNotify="true" />
+        <field id="appController" type="node" bind="/AppController" />
+    </interface>
+    <children>
+        <Timer id="embeddedCloseTimer" duration="0.01" repeat="false" />
+        <Rectangle
+            width="1280"
+            height="720"
+            color="#000000"
+            opacity="0.5" />
+        <Rectangle
+            width="620"
+            height="570"
+            translation="[330,75]"
+            color="#242424">
+            <Label
+                id="title"
+                width="520"
+                translation="[50,32]"
+                horizAlign="center"
+                text="Default playback speed">
+                <Font role="font" uri="font:SystemFontFile" size="28" />
+            </Label>
+            <RadioButtonList
+                id="speedList"
+                width="420"
+                translation="[100,90]"
+                vertFocusAnimationStyle="floatingFocus">
+                <ContentNode id="speedListContent" role="content" />
+            </RadioButtonList>
+        </Rectangle>
+    </children>
+</component>

@@ -22,8 +22,6 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await expectField('#PlayPauseButton.focused', false);
     await expectField('#trickPlayBar.focused', true);
     await expectField('#PreviousButton.disabled', true);
-    await expectField('#SkipBackButton.disabled', false);
-    await expectField('#SkipForwardButton.disabled', false);
     await expectField('#NextButton.disabled', true);
 
     group('Right seeks immediately from the default trackbar focus (no navigation needed)');
@@ -40,18 +38,16 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await expectField('#buttonRow.rowFocused', true);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
     await expectField('#PlayPauseButton.focused', true);
+    await expectField('#buttonRow.focusedLabel', 'Pause');
     await expectField('#trickPlayBar.focused', false);
     await press(Key.Right);
-    await expectField('#buttonRow.focusedIndex', Button.skipForward);
-    await expectField('#SkipForwardButton.focused', true);
-    await press(Key.Right);
-    await expectField('#buttonRow.focusedIndex', Button.quality);
-    await expectField('#QualityButton.focused', true);
-    await expectField('#SkipForwardButton.focused', false);
+    await expectField('#buttonRow.focusedIndex', Button.playbackSettings);
+    await expectField('#PlaybackSettingsButton.focused', true);
+    await expectPred('#buttonRow.focusedLabel', (v) => typeof v === 'string' && v.includes('Playback settings') && v.includes('x'), 'labels settings with current values');
     await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.captions);
     await expectField('#CaptionsButton.focused', true);
-    await expectField('#QualityButton.focused', false);
+    await expectField('#PlaybackSettingsButton.focused', false);
     await expectField('#PlayPauseButton.focused', false);
     await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.stats);
@@ -74,17 +70,11 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.captions);
     await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.quality);
-    await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.skipForward);
+    await expectField('#buttonRow.focusedIndex', Button.playbackSettings);
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
     await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.skipBack);
-    await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.skipBack); // Previous is disabled, so this clamps
-    await press(Key.Right);
-    await expectField('#buttonRow.focusedIndex', Button.playPause);
+    await expectField('#buttonRow.focusedIndex', Button.playPause); // Previous is disabled, so this clamps
 
     group('Down -> back to the trackbar (cursor grows); Up -> back to play/pause');
     await press(Key.Down); // buttons -> bar, or a no-op re-reveal onto the bar (same result either way)
@@ -120,8 +110,7 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await waitFor('#trickPlayBar.focused', (v) => v === true, 'trackbar focused on reveal');
     await press(Key.Up); // -> buttons tier, play/pause (doubled defensively, as above)
     await press(Key.Up);
-    await press(Key.Right); // -> skip forward
-    await press(Key.Right); // -> Quality (skips disabled Next)
+    await press(Key.Right); // -> Playback settings (skips disabled Next)
     await press(Key.Right); // -> Captions
     await press(Key.Right); // -> Stats
     await press(Key.Right); // -> Bookmark

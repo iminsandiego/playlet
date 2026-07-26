@@ -58,14 +58,14 @@ namespace PlayerInvariants
         end if
 
         ' INV-B9 — the hold-accel scratch is bounded: the tick count never goes negative and the per-tick
-        ' step stays within [storyboardStepMs, the duration-scaled cap] (same formula the brain ramps to).
+        ' step stays within [fixed VOD step, the duration-scaled cap] (same formula the brain ramps to).
         if s.scrubHoldTicks < 0
             return Fail("INV-B9")
         end if
-        if s.scrubStepMs < s.storyboardStepMs
+        if s.scrubStepMs < TransportController.VOD_SEEK_STEP_MS
             return Fail("INV-B9")
         end if
-        if s.scrubStepMs > TransportController.ScrubHoldCapMs(s.durationMs, s.storyboardStepMs)
+        if s.scrubStepMs > TransportController.ScrubHoldCapMs(s.durationMs, TransportController.VOD_SEEK_STEP_MS)
             return Fail("INV-B9")
         end if
 

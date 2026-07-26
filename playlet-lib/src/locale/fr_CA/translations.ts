@@ -681,28 +681,28 @@
         <translation>Échec de la génération du code d&apos;appariement manuel</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Lecture</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Préférences de lecture</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
         <source>Autoplay</source>
-        <translation>Lecture automatique</translation>
+        <translation>Autoplay</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>Lorsque vous avez terminé une vidéo, une autre se lance automatiquement</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Qualité préférée</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Qualité vidéo préférée</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Auto</source>

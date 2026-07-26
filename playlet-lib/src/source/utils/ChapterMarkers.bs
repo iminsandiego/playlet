@@ -1,0 +1,222 @@
+import "pkg:/source/utils/ObjectUtils.bs"
+import "pkg:/source/utils/Types.bs"
+
+' Extracts normalized chapter boundaries from the structured YouTube player response when available, with
+' timestamped description lines as the backend-agnostic fallback (including Invidious metadata).
+namespace ChapterMarkers
+
+    function FromPlayerResponse(payload as dynamic, description as dynamic, durationMs as integer) as object
+        structured = ParseStructured(payload)
+        normalized = Normalize(structured, durationMs)
+        if normalized.Count() >= 2
+            return normalized
+        end if
+        return FromDescription(description, durationMs)
+    end function
+
+    function ParseStructured(payload as dynamic) as object
+        if not IsAssociativeArray(payload)
+            return []
+        end if
+
+        markersMap = ObjectUtils.Dig(payload, ["playerOverlays", "playerOverlayRenderer", "decoratedPlayerBarRenderer", "decoratedPlayerBarRenderer", "playerBar", "multiMarkersPlayerBarRenderer", "markersMap"])
+        if not IsArray(markersMap)
+            ' Some client variants omit one decoratedPlayerBarRenderer wrapper.
+            markersMap = ObjectUtils.Dig(payload, ["playerOverlays", "playerOverlayRenderer", "decoratedPlayerBarRenderer", "playerBar", "multiMarkersPlayerBarRenderer", "markersMap"])
+        end if
+        if not IsArray(markersMap)
+            return []
+        end if
+
+        result = []
+        for each mapEntry in markersMap
+            if not IsAssociativeArray(mapEntry)
+                continue for
+            end if
+            chapters = ValidArray(ObjectUtils.Dig(mapEntry, ["value", "chapters"]))
+            for each chapter in chapters
+                if not IsAssociativeArray(chapter)
+                    continue for
+                end if
+                renderer = chapter
+                if IsAssociativeArray(chapter.chapterRenderer)
+                    renderer = chapter.chapterRenderer
+                end if
+                if not IsAssociativeArray(renderer)
+                    continue for
+                end if
+                title = TextValue(renderer.title)
+                if title = ""
+                    continue for
+                end if
+                result.Push({
+                    startMs: ValidInt(renderer.timeRangeStartMillis)
+                    title: title
+                })
+            end for
+        end for
+        return result
+    end function
+
+    function FromDescription(description as dynamic, durationMs as integer) as object
+        if not IsString(description)
+            return []
+        end if
+
+        result = []
+        lines = description.Replace(Chr(13), "").Split(Chr(10))
+        for each rawLine in lines
+            line = rawLine.Trim()
+            separator = FirstWhitespace(line)
+            if separator <= 0
+                continue for
+            end if
+
+            token = line.Left(separator).Trim()
+            if token.StartsWith("[")
+                token = token.Mid(1)
+            end if
+            if token.EndsWith("]")
+                token = token.Left(token.Len() - 1)
+            end if
+            startMs = ParseTimestampMs(token)
+            if startMs < 0
+                continue for
+            end if
+
+            title = line.Mid(separator).Trim()
+            while title.StartsWith("-") or title.StartsWith("–") or title.StartsWith("—")
+                title = title.Mid(1).Trim()
+            end while
+            if title = ""
+                continue for
+            end if
+            result.Push({
+                startMs: startMs
+                title: title
+            })
+        end for
+        return Normalize(result, durationMs)
+    end function
+
+    function Normalize(chapters as dynamic, durationMs as integer) as object
+        if not IsArray(chapters)
+            return []
+        end if
+
+        sorted = []
+        for each chapter in chapters
+            if not IsAssociativeArray(chapter)
+                continue for
+            end if
+            startMs = ValidInt(chapter.startMs)
+            title = ValidString(chapter.title).Trim()
+            if startMs < 0 or title = ""
+                continue for
+            end if
+            if durationMs > 0 and startMs >= durationMs
+                continue for
+            end if
+
+            candidate = { startMs: startMs, title: title }
+            insertionIndex = -1
+            duplicate = false
+            for scanIndex = 0 to sorted.Count() - 1
+                if startMs < sorted[scanIndex].startMs
+                    insertionIndex = scanIndex
+                    exit for
+                else if startMs = sorted[scanIndex].startMs
+                    duplicate = true ' keep the first title for a duplicate boundary
+                    exit for
+                end if
+            end for
+            if not duplicate
+                if insertionIndex < 0
+                    sorted.Push(candidate)
+                else
+                    ' Roku's roArray has no Insert method. Grow once, shift in-place, then fill the open slot.
+                    sorted.Push(candidate)
+                    for shiftIndex = sorted.Count() - 1 to insertionIndex + 1 step -1
+                        sorted[shiftIndex] = sorted[shiftIndex - 1]
+                    end for
+                    sorted[insertionIndex] = candidate
+                end if
+            end if
+        end for
+        return sorted
+    end function
+
+    function ParseTimestampMs(value as dynamic) as integer
+        if not IsString(value)
+            return -1
+        end if
+        parts = value.Split(":")
+        if parts.Count() <> 2 and parts.Count() <> 3
+            return -1
+        end if
+        for each part in parts
+            if not IsDigits(part)
+                return -1
+            end if
+        end for
+
+        hours = 0
+        if parts.Count() = 3
+            hours = parts[0].ToInt()
+            minutes = parts[1].ToInt()
+            seconds = parts[2].ToInt()
+        else
+            minutes = parts[0].ToInt()
+            seconds = parts[1].ToInt()
+        end if
+        if minutes < 0 or seconds < 0 or seconds >= 60
+            return -1
+        end if
+        if parts.Count() = 3 and minutes >= 60
+            return -1
+        end if
+        return ((hours * 3600) + (minutes * 60) + seconds) * 1000
+    end function
+
+    function FirstWhitespace(value as string) as integer
+        for i = 0 to value.Len() - 1
+            ch = value.Mid(i, 1)
+            if ch = " " or ch = Chr(9)
+                return i
+            end if
+        end for
+        return -1
+    end function
+
+    function IsDigits(value as string) as boolean
+        if value = ""
+            return false
+        end if
+        for i = 0 to value.Len() - 1
+            code = Asc(value.Mid(i, 1))
+            if code < 48 or code > 57
+                return false
+            end if
+        end for
+        return true
+    end function
+
+    function TextValue(value as dynamic) as string
+        if IsString(value)
+            return value.Trim()
+        end if
+        if not IsAssociativeArray(value)
+            return ""
+        end if
+        simpleText = ValidString(value.simpleText).Trim()
+        if simpleText <> ""
+            return simpleText
+        end if
+        result = ""
+        for each textRun in ValidArray(value.runs)
+            result += ValidString(textRun.text)
+        end for
+        return result.Trim()
+    end function
+
+end namespace

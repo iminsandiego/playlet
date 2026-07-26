@@ -129,8 +129,8 @@
         <translation>Lädt...</translation>
     </message>
     <message>
-        <source>When you finish a video, another plays automatically</source>
-        <translation>Nach dem Ende eines Videos wird automatisch ein neues Video wiedergegeben</translation>
+        <source>Play a recommended video when the queue ends</source>
+        <translation>Play a recommended video when the queue ends</translation>
     </message>
     <message>
         <source>Auto</source>
@@ -665,16 +665,16 @@
         <translation>Öffnen Sie die YouTube App auf Ihrem Handy.</translation>
     </message>
     <message>
-        <source>Playback</source>
-        <translation>Wiedergabe</translation>
+        <source>Playback defaults</source>
+        <translation>Playback defaults</translation>
     </message>
     <message>
-        <source>Playback preferences</source>
-        <translation>Wiedergabeeinstellungen</translation>
+        <source>Defaults for new videos</source>
+        <translation>Defaults for new videos</translation>
     </message>
     <message>
         <source>Autoplay</source>
-        <translation>Automatische Wiedergabe</translation>
+        <translation>Autoplay</translation>
     </message>
     <message>
         <source>Always</source>
@@ -1021,12 +1021,12 @@
         <translation>Erstellen eines manuellen Verbindungscodes fehlgeschlagen</translation>
     </message>
     <message>
-        <source>Preferred quality</source>
-        <translation>Bevorzugte Qualität</translation>
+        <source>Default quality</source>
+        <translation>Default quality</translation>
     </message>
     <message>
-        <source>Preferred video quality</source>
-        <translation>Bevorzugte Videoqualität</translation>
+        <source>Quality used when a video starts</source>
+        <translation>Quality used when a video starts</translation>
     </message>
     <message>
         <source>Invidious preferences</source>

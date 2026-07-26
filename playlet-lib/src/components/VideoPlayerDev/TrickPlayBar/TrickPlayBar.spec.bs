@@ -20,6 +20,10 @@ namespace Tests
             m.top.glyph = TransportController.Glyph.None
             m.top.atLiveEdge = true
             m.top.liveOffsetMs = 0
+            m.top.focused = false
+            m.top.forceLiveBadge = false
+            m.top.showChapterMarkers = true
+            m.top.chapters = []
         end function
 
         @describe("TrickPlayBar — VOD projection")
@@ -99,6 +103,42 @@ namespace Tests
             m.top.positionMs = 65000 ' 1:05
             m.assertEqual(m.top.findNode("currentLabel").text, "01:05")
             m.assertEqual(m.top.findNode("remainingLabel").text, "02:15") ' 135s left
+        end function
+
+        @describe("TrickPlayBar — chapter markers")
+
+        @it("places a divider at each non-zero chapter boundary")
+        function _()
+            m.top.chapters = [
+                { startMs: 0, title: "Intro" }
+                { startMs: 50000, title: "Topic" }
+                { startMs: 100000, title: "Demo" }
+            ]
+            markers = m.top.findNode("chapterMarkers")
+            m.assertEqual(markers.getChildCount(), 2)
+            m.assertEqual(markers.getChild(0).translation[0], 285.0)
+            m.assertEqual(markers.getChild(1).translation[0], 571.0)
+        end function
+
+        @it("removes dividers when the preference is disabled")
+        function _()
+            m.top.chapters = [
+                { startMs: 0, title: "Intro" }
+                { startMs: 50000, title: "Topic" }
+            ]
+            m.assertEqual(m.top.findNode("chapterMarkers").getChildCount(), 1)
+            m.top.showChapterMarkers = false
+            m.assertEqual(m.top.findNode("chapterMarkers").getChildCount(), 0)
+        end function
+
+        @it("does not draw VOD chapter dividers on a live timeline")
+        function _()
+            m.top.chapters = [
+                { startMs: 0, title: "Intro" }
+                { startMs: 50000, title: "Topic" }
+            ]
+            m.top.isLive = true
+            m.assertEqual(m.top.findNode("chapterMarkers").getChildCount(), 0)
         end function
 
         @describe("TrickPlayBar — glyph swap (handle child)")
@@ -259,6 +299,29 @@ namespace Tests
             m.assertEqual(anim.control, "start") ' the cursor swells on the live bar as well
             m.assertFalse(interp.reverse)
             m.top.focused = false ' restore (the suite shares one node across tests)
+        end function
+
+        @it("shows Go Live only while the focused idle bar is behind the edge")
+        function _()
+            action = m.top.findNode("goLiveAction")
+            m.top.isLive = true
+            m.top.transportMode = TransportController.Mode.Idle
+            m.top.atLiveEdge = false
+            m.top.focused = true
+            m.assertTrue(action.visible)
+            m.assertEqual(m.top.findNode("goLiveKeyLabel").text, "OK")
+            m.assertEqual(m.top.findNode("goLiveLabel").text, Tr(Locale.VideoPlayer.GoLive))
+            m.assertTrue(m.top.findNode("goLiveKeyBackground").uri.InStr("white-border") >= 0)
+            m.assertFalse(action.isSubtype("Rectangle"), "the hint no longer paints a full-width button background")
+
+            m.top.focused = false
+            m.assertFalse(action.visible)
+            m.top.focused = true
+            m.top.atLiveEdge = true
+            m.assertFalse(action.visible)
+            m.top.atLiveEdge = false
+            m.top.transportMode = TransportController.Mode.LiveDvr
+            m.assertFalse(action.visible)
         end function
 
         @describe("TrickPlayBar — SponsorBlock fill tint")

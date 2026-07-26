@@ -4,7 +4,7 @@
 ' Every behavior is asserted, including the input x mode matrix (not just each mode's happy path):
 '   - scrub enter/step/hold (with the duration-scaled acceleration ramp)/commit/cancel; scan
 '     ladder/wrap/flip/cadence/clamp/commit.
-'   - LIVE: Left/Right = +/-5s frozen step (scrubRepeat); Rev/Fwd = 3-level scan LADDER (scan timer) climbing
+'   - LIVE: Left/Right = +/-10s frozen step (scrubRepeat); Rev/Fwd = 3-level scan LADDER (scan timer) climbing
 '     L1->2->3->1, reverse clamps at the DVR floor, forward auto-resumes at the edge; offset counts up frozen.
 '   - LIVE step<->ladder sub-mode transitions clear the other sub-mode's scratch (no stale-tick bleed).
 '   - InstantReplay from idle AND from any transport (scrub/scan/live), and the not-ready input drop.
@@ -65,39 +65,58 @@ namespace Tests
         ' =========================================================================================
         @describe("scrub")
 
-        @it("enter freezes the video, snaps to the grid, and steps once")
+        @it("enter freezes the video and steps forward by a fixed 10 seconds")
         function _()
-            ' position 60000 is already on the 2s grid; step right -> 62000
             m.t.HandleCommand(TransportController.Command.Right)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Scrub)
             intent = m.t.TakeVideoIntent()
             m.assertEqual(intent.control, TransportController.Control.Pause) ' the FREEZE
             m.assertFalse(intent.hasSeek)
-            m.assertEqual(m.t.cursorMs, 62000)
+            m.assertEqual(m.t.cursorMs, 70000)
             m.assertEqual(m.t.glyph, TransportController.Glyph.SkipAhead)
         end function
 
-        @it("snaps the entry cursor down to the storyboard grid")
+        @it("steps from the exact position instead of quantizing to the storyboard grid")
         function _()
             m.t.OnPosition(61300) ' off-grid
             m.t.HandleCommand(TransportController.Command.Left)
-            ' snap 61300 -> 60000, then step left -> 58000
-            m.assertEqual(m.t.cursorMs, 58000)
+            m.assertEqual(m.t.cursorMs, 51300)
             m.assertEqual(m.t.glyph, TransportController.Glyph.SkipBack)
         end function
 
         @it("steps flat per tap with no acceleration")
         function _()
-            m.t.HandleCommand(TransportController.Command.Right) ' 62000
-            m.t.HandleCommand(TransportController.Command.Right) ' 64000
-            m.t.HandleCommand(TransportController.Command.Right) ' 66000
-            m.assertEqual(m.t.cursorMs, 66000)
+            m.t.HandleCommand(TransportController.Command.Right) ' 70000
+            m.t.HandleCommand(TransportController.Command.Right) ' 80000
+            m.t.HandleCommand(TransportController.Command.Right) ' 90000
+            m.assertEqual(m.t.cursorMs, 90000)
+        end function
+
+        @it("uses 10 seconds after either 5s or 10s storyboard metadata arrives")
+        function _()
+            fiveSecondTiles = new TransportController.Controller()
+            fiveSecondTiles.SetContent(false, 2000, false)
+            fiveSecondTiles.UpdateStoryboards(5000, true)
+            fiveSecondTiles.OnDuration(210000)
+            fiveSecondTiles.OnPosition(60000)
+            fiveSecondTiles.OnReady()
+            fiveSecondTiles.HandleCommand(TransportController.Command.Right)
+            m.assertEqual(fiveSecondTiles.cursorMs, 70000)
+
+            tenSecondTiles = new TransportController.Controller()
+            tenSecondTiles.SetContent(false, 2000, false)
+            tenSecondTiles.UpdateStoryboards(10000, true)
+            tenSecondTiles.OnDuration(210000)
+            tenSecondTiles.OnPosition(60000)
+            tenSecondTiles.OnReady()
+            tenSecondTiles.HandleCommand(TransportController.Command.Left)
+            m.assertEqual(tenSecondTiles.cursorMs, 50000)
         end function
 
         @it("clamps the cursor to [0, duration]")
         function _()
             m.t.OnPosition(1000)
-            m.t.HandleCommand(TransportController.Command.Left) ' snap 0, step -2000 -> clamp 0
+            m.t.HandleCommand(TransportController.Command.Left) ' 1000 - 10000 -> clamp 0
             m.assertEqual(m.t.cursorMs, 0)
             m.t.HandleCommand(TransportController.Command.Left) ' stays 0
             m.assertEqual(m.t.cursorMs, 0)
@@ -105,17 +124,17 @@ namespace Tests
 
         @it("hold-repeat arms typematic then steps on each tick")
         function _()
-            m.t.HandleKey(TransportController.Command.Right, true) ' keydown -> 62000
+            m.t.HandleKey(TransportController.Command.Right, true) ' keydown -> 70000
             cmd = m.t.TakeTimerCmd()
             m.assertEqual(cmd.id, TransportController.Timer.ScrubRepeat)
             m.assertEqual(cmd.delayMs, TransportController.SCRUB_REPEAT_INITIAL_MS) ' 510ms initial
             ' fire -> step + re-arm at the repeat cadence (120ms)
             m.t.Tick(TransportController.Timer.ScrubRepeat)
-            m.assertEqual(m.t.cursorMs, 64000)
+            m.assertEqual(m.t.cursorMs, 80000)
             cmd = m.t.TakeTimerCmd()
             m.assertEqual(cmd.delayMs, TransportController.SCRUB_REPEAT_MS) ' 120ms repeat
             m.t.Tick(TransportController.Timer.ScrubRepeat)
-            m.assertEqual(m.t.cursorMs, 66000)
+            m.assertEqual(m.t.cursorMs, 90000)
         end function
 
         @it("hold acceleration: flat through the ramp delay, then the step grows to the duration-scaled cap")
@@ -123,13 +142,13 @@ namespace Tests
             ' 10h VOD: 36000000ms is exactly representable in single precision, so Sqr is exact and the
             ' cap is deterministic: 61 * Sqr(36000000) = 61 * 6000 = 366000ms per tick.
             m.t.OnDuration(36000000)
-            m.t.HandleKey(TransportController.Command.Right, true) ' keydown -> 62000
-            ' the first RAMP_DELAY ticks step the flat grid (the fine-adjust window).
+            m.t.HandleKey(TransportController.Command.Right, true) ' keydown -> 70000
+            ' the first RAMP_DELAY ticks step the fixed 10s base (the fine-adjust window).
             for i = 1 to TransportController.SCRUB_HOLD_RAMP_DELAY_TICKS
                 m.t.Tick(TransportController.Timer.ScrubRepeat)
             end for
-            m.assertEqual(m.t.cursorMs, 62000 + TransportController.SCRUB_HOLD_RAMP_DELAY_TICKS * 2000)
-            m.assertEqual(m.t.scrubStepMs, 2000)
+            m.assertEqual(m.t.cursorMs, 70000 + TransportController.SCRUB_HOLD_RAMP_DELAY_TICKS * TransportController.VOD_SEEK_STEP_MS)
+            m.assertEqual(m.t.scrubStepMs, TransportController.VOD_SEEK_STEP_MS)
             ' the next tick starts the ramp: the step grows, monotonically, never past the cap.
             prev = m.t.scrubStepMs
             for i = 1 to 150
@@ -148,12 +167,12 @@ namespace Tests
             for i = 1 to 30 ' well into the ramp
                 m.t.Tick(TransportController.Timer.ScrubRepeat)
             end for
-            m.assertTrue(m.t.scrubStepMs > 2000)
+            m.assertTrue(m.t.scrubStepMs > TransportController.VOD_SEEK_STEP_MS)
             m.t.HandleKey(TransportController.Command.Right, false) ' release
             before = m.t.cursorMs
             m.t.HandleKey(TransportController.Command.Right, true) ' fresh press
-            m.assertEqual(m.t.scrubStepMs, 2000) ' ramp restarted
-            m.assertEqual(m.t.cursorMs, before + 2000) ' the fresh press steps the flat grid
+            m.assertEqual(m.t.scrubStepMs, TransportController.VOD_SEEK_STEP_MS) ' ramp restarted
+            m.assertEqual(m.t.cursorMs, before + TransportController.VOD_SEEK_STEP_MS)
         end function
 
         @it("hold acceleration: an unknown duration never accelerates (the cap floors at the grid step)")
@@ -166,7 +185,7 @@ namespace Tests
             for i = 1 to 50
                 t.Tick(TransportController.Timer.ScrubRepeat)
             end for
-            m.assertEqual(t.scrubStepMs, 2000)
+            m.assertEqual(t.scrubStepMs, TransportController.VOD_SEEK_STEP_MS)
         end function
 
         @it("keyUp stops the hold-repeat and clears the glyph")
@@ -185,8 +204,8 @@ namespace Tests
 
         @it("commit seeks to the cursor, resumes, and returns to idle (no teardown call)")
         function _()
-            m.t.HandleCommand(TransportController.Command.Right) ' cursor 62000
-            m.t.HandleCommand(TransportController.Command.Right) ' cursor 64000
+            m.t.HandleCommand(TransportController.Command.Right) ' cursor 70000
+            m.t.HandleCommand(TransportController.Command.Right) ' cursor 80000
             seqBefore = m.t.commitSeq
             m.t.HandleCommand(TransportController.Command.Commit)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Idle) ' renderers self-hide off this
@@ -195,11 +214,11 @@ namespace Tests
             intent = m.t.TakeVideoIntent()
             m.assertEqual(intent.control, TransportController.Control.Resume)
             m.assertTrue(intent.hasSeek)
-            m.assertEqual(intent.seekMs, 64000)
+            m.assertEqual(intent.seekMs, 80000)
             ' positionMs optimistically advances to the committed target so the idle bar shows it immediately
             ' (no playhead snap-back to the old 60000 while the seek is in flight).
-            m.assertEqual(m.t.positionMs, 64000)
-            m.assertEqual(m.t.cursorMs, 64000)
+            m.assertEqual(m.t.positionMs, 80000)
+            m.assertEqual(m.t.cursorMs, 80000)
         end function
 
         @it("ResetTransport (Minimize and the other involuntary resets) resets to idle, emitting no seek/resume/exit")
@@ -252,12 +271,27 @@ namespace Tests
             m.assertTrue(cmd.repeat) ' free-runs
         end function
 
-        @it("free-runs: each tick advances the cursor by step*mult with no further input")
+        @it("free-runs: each L1 tick advances by the same fixed 10 seconds as Left/Right")
         function _()
             m.t.HandleCommand(TransportController.Command.Fwd) ' cursor seeded at position 60000, L1
-            m.t.Tick(TransportController.Timer.Scan) ' +2000 -> 62000
-            m.t.Tick(TransportController.Timer.Scan) ' +2000 -> 64000
-            m.assertEqual(m.t.cursorMs, 64000)
+            m.t.Tick(TransportController.Timer.Scan) ' +10000 -> 70000
+            m.t.Tick(TransportController.Timer.Scan) ' +10000 -> 80000
+            m.assertEqual(m.t.cursorMs, 80000)
+        end function
+
+        @it("uses the fixed 10-second base for both FF and RW with 5-second storyboards")
+        function _()
+            m.t.UpdateStoryboards(5000, true)
+            m.t.HandleCommand(TransportController.Command.Fwd)
+            m.t.Tick(TransportController.Timer.Scan)
+            m.assertEqual(m.t.cursorMs, 70000)
+
+            m.t.HandleCommand(TransportController.Command.Commit)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(60000)
+            m.t.HandleCommand(TransportController.Command.Rev)
+            m.t.Tick(TransportController.Timer.Scan)
+            m.assertEqual(m.t.cursorMs, 50000)
         end function
 
         @it("same-dir tap climbs the ladder 1->2->3 and wraps to 1")
@@ -282,19 +316,19 @@ namespace Tests
             m.assertEqual(cmd.delayMs, 600)
             base = m.t.cursorMs
             m.t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(m.t.cursorMs - base, 2000) ' L1 = step*1
+            m.assertEqual(m.t.cursorMs - base, 10000) ' L1 = fixed 10s
             m.t.HandleCommand(TransportController.Command.Fwd) ' L2
             cmd = m.t.TakeTimerCmd()
             m.assertEqual(cmd.delayMs, 330)
             base = m.t.cursorMs
             m.t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(m.t.cursorMs - base, 6000) ' L2 = step*3
+            m.assertEqual(m.t.cursorMs - base, 30000) ' L2 = 3x
             m.t.HandleCommand(TransportController.Command.Fwd) ' L3
             cmd = m.t.TakeTimerCmd()
             m.assertEqual(cmd.delayMs, 260)
             base = m.t.cursorMs
             m.t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(m.t.cursorMs - base, 12000) ' L3 = step*6
+            m.assertEqual(m.t.cursorMs - base, 60000) ' L3 = 6x
         end function
 
         @it("opposite-dir tap flips direction and resets to L1")
@@ -306,7 +340,7 @@ namespace Tests
             m.assertEqual(m.t.glyph, TransportController.Glyph.Rwx1)
             base = m.t.cursorMs
             m.t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(m.t.cursorMs - base, -2000) ' now scanning backward
+            m.assertEqual(m.t.cursorMs - base, -10000) ' now scanning backward
         end function
 
         @it("keyUp is a no-op (the scan latches)")
@@ -319,7 +353,7 @@ namespace Tests
             ' still free-runs after keyUp
             base = m.t.cursorMs
             m.t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(m.t.cursorMs - base, 2000)
+            m.assertEqual(m.t.cursorMs - base, 10000)
         end function
 
         @it("clamps and HOLDS at the end, does not auto-commit")
@@ -335,7 +369,7 @@ namespace Tests
         @it("Play and OK both commit a scan (seek + resume + idle)")
         function _()
             m.t.HandleCommand(TransportController.Command.Fwd)
-            m.t.Tick(TransportController.Timer.Scan) ' 62000
+            m.t.Tick(TransportController.Timer.Scan) ' 70000
             target = m.t.cursorMs
             m.t.HandleCommand(TransportController.Command.Commit)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Idle)
@@ -346,10 +380,10 @@ namespace Tests
 
         @it("scrub then Fwd transitions into scan keeping the cursor")
         function _()
-            m.t.HandleCommand(TransportController.Command.Right) ' scrub cursor 62000
+            m.t.HandleCommand(TransportController.Command.Right) ' scrub cursor 70000
             m.t.HandleCommand(TransportController.Command.Fwd) ' -> scan, keep cursor
             m.assertEqual(m.t.transportMode, TransportController.Mode.Scan)
-            m.assertEqual(m.t.cursorMs, 62000) ' cursor preserved across the transition
+            m.assertEqual(m.t.cursorMs, 70000) ' cursor preserved across the transition
             m.assertEqual(m.t.scanLevel, 1)
         end function
 
@@ -399,28 +433,28 @@ namespace Tests
 
         @it("InstantReplay from a VOD scrub cancels the freeze and resumes from cursor-20s")
         function _()
-            m.t.HandleCommand(TransportController.Command.Right) ' scrub: freeze, cursor 62000
-            m.t.HandleCommand(TransportController.Command.Right) ' cursor 64000
+            m.t.HandleCommand(TransportController.Command.Right) ' scrub: freeze, cursor 70000
+            m.t.HandleCommand(TransportController.Command.Right) ' cursor 80000
             m.t.TakeVideoIntent() ' drain the freeze
             m.t.HandleCommand(TransportController.Command.Replay)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Idle) ' transport cancelled
             m.assertEqual(m.t.glyph, TransportController.Glyph.Replay) ' the transient InstantReplay icon
             intent = m.t.TakeVideoIntent()
             m.assertTrue(intent.hasSeek)
-            m.assertEqual(intent.seekMs, 44000) ' cursor 64000 - 20000
+            m.assertEqual(intent.seekMs, 60000) ' cursor 80000 - 20000
             m.assertEqual(intent.control, TransportController.Control.Resume) ' was frozen -> resume playing
         end function
 
         @it("InstantReplay from a VOD scan cancels the scan and resumes from cursor-20s")
         function _()
             m.t.HandleCommand(TransportController.Command.Fwd) ' scan freeze, cursor 60000
-            m.t.Tick(TransportController.Timer.Scan) ' 62000
-            m.t.Tick(TransportController.Timer.Scan) ' 64000
+            m.t.Tick(TransportController.Timer.Scan) ' 70000
+            m.t.Tick(TransportController.Timer.Scan) ' 80000
             m.t.TakeVideoIntent()
             m.t.HandleCommand(TransportController.Command.Replay)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Idle)
             intent = m.t.TakeVideoIntent()
-            m.assertEqual(intent.seekMs, 44000) ' 64000 - 20000
+            m.assertEqual(intent.seekMs, 60000) ' 80000 - 20000
             m.assertEqual(intent.control, TransportController.Control.Resume)
             ' a stale scan tick after the replay must NOT move the cursor
             before = m.t.cursorMs
@@ -436,14 +470,14 @@ namespace Tests
             t.OnPosition(300000)
             t.OnPosition(300000) ' confirmed
             t.OnReady()
-            t.HandleCommand(TransportController.Command.Left) ' 295000
             t.HandleCommand(TransportController.Command.Left) ' 290000
+            t.HandleCommand(TransportController.Command.Left) ' 280000
             t.TakeVideoIntent()
             t.HandleCommand(TransportController.Command.Replay)
             m.assertEqual(t.transportMode, TransportController.Mode.Idle) ' transport cancelled
             intent = t.TakeVideoIntent()
             m.assertTrue(intent.hasSeek)
-            m.assertEqual(intent.seekMs, 270000) ' cursor 290000 - 20000
+            m.assertEqual(intent.seekMs, 260000) ' cursor 280000 - 20000
             m.assertEqual(intent.control, TransportController.Control.Resume) ' was frozen -> resume playing
             m.assertFalse(t.atLiveEdge) ' still behind the edge
         end function
@@ -508,7 +542,7 @@ namespace Tests
 
         ' =========================================================================================
         ' LIVE DVR — USER A/B SPEC (P5): rewind is a FROZEN VOD-scrub-shaped seek-back (NOT one-jump+resume).
-        ' Left/Rev -> freeze (pause, NO per-press seek), cursor steps -5s, HOLD repeats on scrubRepeat; the
+        ' Left/Rev -> freeze (pause, NO per-press seek), cursor steps -10s, HOLD repeats on scrubRepeat; the
         ' real seek happens only on commit/edge. Offset counts up while frozen. Fwd-preview-then-edge resumes.
         ' =========================================================================================
         @describe("live dvr")
@@ -523,13 +557,13 @@ namespace Tests
             return t
         end function
 
-        @it("Left FREEZES (pause) and steps the cursor -5s WITHOUT a per-press seek (frozen scrub)")
+        @it("Left FREEZES (pause) and steps the cursor -10s WITHOUT a per-press seek (frozen scrub)")
         function _()
             t = m.Live()
             t.HandleCommand(TransportController.Command.Left)
             m.assertEqual(t.transportMode, TransportController.Mode.LiveDvr)
-            m.assertEqual(t.cursorMs, 295000) ' 300000 - 5000
-            m.assertEqual(t.liveOffsetMs, 5000) ' edge - cursor
+            m.assertEqual(t.cursorMs, 290000) ' 300000 - 10000
+            m.assertEqual(t.liveOffsetMs, 10000) ' edge - cursor
             m.assertFalse(t.atLiveEdge)
             m.assertEqual(t.glyph, TransportController.Glyph.SkipBack)
             ' the ONLY intent is the FREEZE — no seek per press (the seek waits for commit/edge)
@@ -542,18 +576,43 @@ namespace Tests
             m.assertEqual(cmd.delayMs, TransportController.SCRUB_REPEAT_INITIAL_MS)
         end function
 
+        @it("an immediate rewind locks the startup latency before behind-edge samples can absorb it")
+        function _()
+            t = new TransportController.Controller()
+            t.SetContent(true, 0, false)
+            t.OnLiveEdge(300000)
+            t.OnPosition(278000) ' only one sample: the 22s startup latency is not confirmed yet
+            t.OnReady()
+            m.assertEqual(t.liveMinGapMs, -1)
+
+            t.HandleCommand(TransportController.Command.Left)
+            m.assertEqual(t.liveMinGapMs, 22000, "user transport freezes the current latency baseline")
+            m.assertEqual(t.liveOffsetMs, 10000)
+            t.TakeVideoIntent() ' freeze
+            t.HandleCommand(TransportController.Command.Commit)
+            t.TakeVideoIntent() ' seek + resume behind the edge
+
+            ' The committed position can now report repeatedly without being learned as a new 27s latency.
+            t.OnPosition(268000)
+            t.OnPosition(268000)
+            m.assertEqual(t.liveMinGapMs, 22000)
+            m.assertEqual(t.liveOffsetMs, 10000)
+            m.assertFalse(t.atLiveEdge)
+            m.assertTrue(t.GoLive(), "Go Live stays available after the early rewind")
+        end function
+
         @it("hold-repeat steps the frozen cursor on each tick, still no seek")
         function _()
             t = m.Live()
-            t.HandleKey(TransportController.Command.Left, true) ' keydown -> 295000, freeze
+            t.HandleKey(TransportController.Command.Left, true) ' keydown -> 290000, freeze
             t.TakeVideoIntent()
-            t.Tick(TransportController.Timer.ScrubRepeat) ' -> 290000
-            m.assertEqual(t.cursorMs, 290000)
+            t.Tick(TransportController.Timer.ScrubRepeat) ' -> 280000
+            m.assertEqual(t.cursorMs, 280000)
             m.assertInvalid(t.TakeVideoIntent()) ' NO seek on a hold tick
             cmd = t.TakeTimerCmd()
             m.assertEqual(cmd.delayMs, TransportController.SCRUB_REPEAT_MS) ' re-armed at the repeat cadence
-            t.Tick(TransportController.Timer.ScrubRepeat) ' -> 285000
-            m.assertEqual(t.cursorMs, 285000)
+            t.Tick(TransportController.Timer.ScrubRepeat) ' -> 270000
+            m.assertEqual(t.cursorMs, 270000)
         end function
 
         @it("keyUp stops the hold-repeat (the offset keeps counting via the coordinator's edge clock)")
@@ -572,10 +631,10 @@ namespace Tests
             m.assertEqual(t.cursorMs, before)
             ' the edge clock keeps the offset counting up while sitting rewound
             t.OnLiveEdge(303000)
-            m.assertEqual(t.liveOffsetMs, 8000) ' was 5000 behind; the edge moved +3s
+            m.assertEqual(t.liveOffsetMs, 13000) ' was 10000 behind; the edge moved +3s
         end function
 
-        @it("Rev is the 3-level reverse scan ladder, NOT the Left -5s step (user A/B)")
+        @it("Rev is the 3-level reverse scan ladder, NOT the Left -10s step (user A/B)")
         function _()
             t = m.Live()
             t.HandleCommand(TransportController.Command.Rev) ' enter reverse ladder at L1
@@ -603,14 +662,14 @@ namespace Tests
             t.HandleCommand(TransportController.Command.Rev) ' rwx1
             m.assertEqual(t.glyph, TransportController.Glyph.Rwx1)
             base = t.cursorMs
-            t.Tick(TransportController.Timer.Scan) ' L1 = step*1 backward (storyboardStepMs default 2000)
-            m.assertEqual(t.cursorMs - base, -2000)
+            t.Tick(TransportController.Timer.Scan) ' L1 = fixed 10s backward
+            m.assertEqual(t.cursorMs - base, -10000)
             t.HandleCommand(TransportController.Command.Rev) ' rwx2
             m.assertEqual(t.scanLevel, 2)
             m.assertEqual(t.glyph, TransportController.Glyph.Rwx2)
             base = t.cursorMs
             t.Tick(TransportController.Timer.Scan) ' L2 = step*3 backward
-            m.assertEqual(t.cursorMs - base, -6000)
+            m.assertEqual(t.cursorMs - base, -30000)
             t.HandleCommand(TransportController.Command.Rev) ' rwx3
             m.assertEqual(t.scanLevel, 3)
             t.HandleCommand(TransportController.Command.Rev) ' wrap -> L1
@@ -623,8 +682,7 @@ namespace Tests
             t = m.Live()
             t.OnPosition(3000) ' near the floor
             t.HandleCommand(TransportController.Command.Rev) ' enter at cursor 3000
-            t.Tick(TransportController.Timer.Scan) ' 3000 - 2000 -> 1000
-            t.Tick(TransportController.Timer.Scan) ' 1000 - 2000 -> clamp 0
+            t.Tick(TransportController.Timer.Scan) ' 3000 - 10000 -> clamp 0
             m.assertEqual(t.cursorMs, 0)
             t.Tick(TransportController.Timer.Scan) ' HOLD at 0
             m.assertEqual(t.cursorMs, 0)
@@ -636,7 +694,7 @@ namespace Tests
             t = m.Live()
             ' rewind a long way so the forward ladder has room to climb before hitting the edge
             for i = 0 to 9
-                t.HandleCommand(TransportController.Command.Left) ' step -5s each -> cursor 250000
+                t.HandleCommand(TransportController.Command.Left) ' step -10s each -> cursor 200000
             end for
             t.HandleCommand(TransportController.Command.Fwd) ' ffx1
             m.assertEqual(t.scanDir, 1)
@@ -667,37 +725,69 @@ namespace Tests
         @it("offset counts up while frozen because the live edge advances")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' cursor 295000, offset 5000
-            m.assertEqual(t.liveOffsetMs, 5000)
+            t.HandleCommand(TransportController.Command.Left) ' cursor 290000, offset 10000
+            m.assertEqual(t.liveOffsetMs, 10000)
             ' the clock-anchored edge advances (1s heartbeat) -> offset grows even though the cursor is frozen
             t.OnLiveEdge(305000)
-            m.assertEqual(t.cursorMs, 295000) ' cursor still frozen
-            m.assertEqual(t.liveOffsetMs, 10000) ' 305000 - 295000
+            m.assertEqual(t.cursorMs, 290000) ' cursor still frozen
+            m.assertEqual(t.liveOffsetMs, 15000) ' 305000 - 290000
             t.OnLiveEdge(306000)
-            m.assertEqual(t.liveOffsetMs, 11000)
+            m.assertEqual(t.liveOffsetMs, 16000)
         end function
 
-        @it("Right steps +5s back toward the edge, still frozen")
+        @it("Right steps +10s back toward the edge, still frozen")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' 295000
             t.HandleCommand(TransportController.Command.Left) ' 290000
-            t.HandleCommand(TransportController.Command.Right) ' 295000
-            m.assertEqual(t.cursorMs, 295000)
+            t.HandleCommand(TransportController.Command.Left) ' 280000
+            t.HandleCommand(TransportController.Command.Right) ' 290000
+            m.assertEqual(t.cursorMs, 290000)
             m.assertEqual(t.transportMode, TransportController.Mode.LiveDvr)
         end function
 
         @it("Right reaching the edge auto-resumes to the live edge")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' 295000, offset 5000
+            t.HandleCommand(TransportController.Command.Left) ' 290000, offset 10000
             t.TakeVideoIntent()
-            t.HandleCommand(TransportController.Command.Right) ' +5s -> reaches edge -> auto-resume
+            t.HandleCommand(TransportController.Command.Right) ' +10s -> reaches edge -> auto-resume
             m.assertEqual(t.transportMode, TransportController.Mode.Idle)
             m.assertTrue(t.atLiveEdge)
             intent = t.TakeVideoIntent()
             m.assertEqual(intent.control, TransportController.Control.Resume)
             m.assertEqual(intent.seekMs, TransportController.LIVE_EDGE_SEEK_MS) ' jump to the live edge
+        end function
+
+        @it("Go Live jumps from an idle behind-edge position to the live edge")
+        function _()
+            t = m.Live()
+            t.HandleCommand(TransportController.Command.Left)
+            t.TakeVideoIntent() ' freeze
+            t.HandleCommand(TransportController.Command.Commit)
+            t.TakeVideoIntent() ' commit behind
+            t.OnPosition(290000)
+            m.assertFalse(t.atLiveEdge)
+            m.assertEqual(t.transportMode, TransportController.Mode.Idle)
+
+            m.assertTrue(t.GoLive())
+            m.assertTrue(t.atLiveEdge)
+            intent = t.TakeVideoIntent()
+            m.assertEqual(intent.control, TransportController.Control.Resume)
+            m.assertTrue(intent.hasSeek)
+            m.assertEqual(intent.seekMs, TransportController.LIVE_EDGE_SEEK_MS)
+        end function
+
+        @it("Go Live is unavailable at the edge, during transport, and for VOD")
+        function _()
+            t = m.Live()
+            m.assertFalse(t.GoLive(), "already at the edge")
+            m.assertInvalid(t.TakeVideoIntent())
+
+            t.HandleCommand(TransportController.Command.Left)
+            m.assertFalse(t.GoLive(), "active live transport owns OK")
+
+            m.assertFalse(m.t.GoLive(), "VOD never exposes Go Live")
+            m.assertInvalid(m.t.TakeVideoIntent())
         end function
 
         @it("forward reaches the EFFECTIVE edge and auto-commits with baseline>0 (no 0:00 dead-zone — user A/B)")
@@ -711,11 +801,11 @@ namespace Tests
             t.OnPosition(278000) ' confirmed: min-gap 22000 -> effectiveEdge 278000
             t.OnReady()
             m.assertEqual(t.liveMinGapMs, 22000)
-            t.HandleCommand(TransportController.Command.Left) ' rewind -> cursor 273000, offset 5000
-            m.assertEqual(t.cursorMs, 273000)
-            m.assertEqual(t.liveOffsetMs, 5000)
+            t.HandleCommand(TransportController.Command.Left) ' rewind -> cursor 268000, offset 10000
+            m.assertEqual(t.cursorMs, 268000)
+            m.assertEqual(t.liveOffsetMs, 10000)
             t.TakeVideoIntent() ' drain the freeze
-            ' one Right (+5s) hits the effective edge (278000) -> auto-commit + resume to live. (Old code
+            ' one Right (+10s) hits the effective edge (278000) -> auto-commit + resume to live. (Old code
             ' committed only at the RAW edge 300000, so the cursor kept stepping forward at offset 0:00 — the
             ' dead-zone bug. This assertion fails on the old code and passes on the fix.)
             t.HandleCommand(TransportController.Command.Right)
@@ -736,9 +826,9 @@ namespace Tests
             t.OnReady()
             m.assertEqual(t.liveOffsetMs, 0) ' at rest reads ● LIVE
             t.HandleCommand(TransportController.Command.Left)
-            m.assertEqual(t.liveOffsetMs, 5000) ' grows immediately, not after climbing out of a dead-zone
+            m.assertEqual(t.liveOffsetMs, 10000) ' grows immediately, not after climbing out of a dead-zone
             t.HandleCommand(TransportController.Command.Left)
-            m.assertEqual(t.liveOffsetMs, 10000)
+            m.assertEqual(t.liveOffsetMs, 20000)
         end function
 
         @it("live scan jump SCALES with the DVR window on a long stream (1:3:6, user A/B)")
@@ -762,31 +852,31 @@ namespace Tests
             m.assertEqual(base - t.cursorMs, 60000)
         end function
 
-        @it("short DVR keeps the storyboard-interval base (window scaling only RAISES it)")
+        @it("short DVR keeps the fixed 10-second base (window scaling only RAISES it)")
         function _()
             t = new TransportController.Controller()
-            t.SetContent(true, 0, false) ' storyboard interval 2000
-            t.OnLiveEdge(300000) ' 300000/4000 = 75 << 2000 -> base stays 2000
+            t.SetContent(true, 0, false)
+            t.OnLiveEdge(300000) ' 300000/4000 = 75 << 10000 -> base stays 10000
             t.OnPosition(300000)
             t.OnReady()
             t.HandleCommand(TransportController.Command.Rev)
             base = t.cursorMs
             t.Tick(TransportController.Timer.Scan)
-            m.assertEqual(base - t.cursorMs, 2000) ' unchanged for short DVR
+            m.assertEqual(base - t.cursorMs, 10000)
         end function
 
         @it("commit (OK/Play) while rewound resumes PLAYING from the cursor, still behind the edge")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' 295000
             t.HandleCommand(TransportController.Command.Left) ' 290000
-            t.HandleCommand(TransportController.Command.Left) ' 285000
+            t.HandleCommand(TransportController.Command.Left) ' 280000
+            t.HandleCommand(TransportController.Command.Left) ' 270000
             t.TakeVideoIntent()
             t.HandleCommand(TransportController.Command.Commit)
             m.assertEqual(t.transportMode, TransportController.Mode.Idle)
             intent = t.TakeVideoIntent()
             m.assertEqual(intent.control, TransportController.Control.Resume)
-            m.assertEqual(intent.seekMs, 285000) ' seek to the rewound cursor, NOT the edge
+            m.assertEqual(intent.seekMs, 270000) ' seek to the rewound cursor, NOT the edge
             m.assertFalse(t.atLiveEdge) ' still behind -> badge swaps to the offset after the reveal
         end function
 
@@ -794,9 +884,9 @@ namespace Tests
         function _()
             t = m.Live()
             ' rewind a fair way so the forward scan has room
-            t.HandleCommand(TransportController.Command.Left) ' 295000
             t.HandleCommand(TransportController.Command.Left) ' 290000
-            t.HandleCommand(TransportController.Command.Left) ' 285000
+            t.HandleCommand(TransportController.Command.Left) ' 280000
+            t.HandleCommand(TransportController.Command.Left) ' 270000
             t.TakeVideoIntent() ' drain the freeze
             t.TakeTimerCmd()
             ' Fwd -> continuous forward PREVIEW scan
@@ -831,8 +921,8 @@ namespace Tests
         @it("step (Left) -> ladder (Rev) clears the held-step scratch and a stale step tick is a no-op")
         function _()
             t = m.Live()
-            t.HandleKey(TransportController.Command.Left, true) ' step: scrubHeldDir = -1, cursor 295000
-            m.assertEqual(t.cursorMs, 295000)
+            t.HandleKey(TransportController.Command.Left, true) ' step: scrubHeldDir = -1, cursor 290000
+            m.assertEqual(t.cursorMs, 290000)
             t.HandleCommand(TransportController.Command.Rev) ' enter reverse ladder
             m.assertEqual(t.scrubHeldDir, 0) ' the held-step direction is cleared
             m.assertEqual(t.scanDir, -1)
@@ -850,7 +940,7 @@ namespace Tests
             t.HandleCommand(TransportController.Command.Rev) ' ladder: scanDir -1, L1
             t.HandleCommand(TransportController.Command.Rev) ' climb to L2
             m.assertEqual(t.scanLevel, 2)
-            t.HandleCommand(TransportController.Command.Left) ' switch to the -5s step
+            t.HandleCommand(TransportController.Command.Left) ' switch to the -10s step
             m.assertEqual(t.scanDir, 0) ' the ladder direction is cleared
             m.assertEqual(t.scanLevel, 0) ' the ladder level is cleared
             m.assertEqual(t.scrubHeldDir, -1) ' now a held step
@@ -864,16 +954,16 @@ namespace Tests
         @it("Left -> Rev -> Left round-trips cleanly with no scratch bleed")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' step -> 295000
-            m.assertEqual(t.cursorMs, 295000)
+            t.HandleCommand(TransportController.Command.Left) ' step -> 290000
+            m.assertEqual(t.cursorMs, 290000)
             t.HandleCommand(TransportController.Command.Rev) ' ladder L1 (does not move on press)
-            m.assertEqual(t.cursorMs, 295000)
-            t.Tick(TransportController.Timer.Scan) ' ladder tick -> 293000
-            m.assertEqual(t.cursorMs, 293000)
+            m.assertEqual(t.cursorMs, 290000)
+            t.Tick(TransportController.Timer.Scan) ' ladder tick -> 280000
+            m.assertEqual(t.cursorMs, 280000)
             t.HandleCommand(TransportController.Command.Left) ' back to step
             m.assertEqual(t.scanLevel, 0)
             m.assertEqual(t.glyph, TransportController.Glyph.SkipBack)
-            m.assertEqual(t.cursorMs, 288000) ' 293000 - 5000 step
+            m.assertEqual(t.cursorMs, 270000) ' 280000 - 10000 step
         end function
 
         @it("atLiveEdge is true at rest and false after a rewind")
@@ -906,10 +996,10 @@ namespace Tests
             m.assertEqual(t.liveOffsetMs, 0)
         end function
 
-        @it("offset is baseline-relative: a 5s rewind on a high-latency stream reads ~0:05, not the latency")
+        @it("offset is baseline-relative: a 10s rewind on a high-latency stream reads ~0:10, not the latency")
         function _()
             ' a real stream where the buffer latency is 22s: at rest the cursor (position) rides 22s behind the
-            ' reported edge YET shows "● LIVE". A 5s rewind must read 0:05 (stock parity), NOT 0:27 (raw distance).
+            ' reported edge YET shows "● LIVE". A 10s rewind must read 0:10, NOT 0:32 (raw distance).
             t = new TransportController.Controller()
             t.SetContent(true, 0, false)
             t.OnLiveEdge(300000) ' edge 300000
@@ -920,19 +1010,19 @@ namespace Tests
             m.assertEqual(t.liveOffsetMs, 0)
             m.assertTrue(t.atLiveEdge)
             m.assertEqual(t.liveMinGapMs, 22000)
-            ' one Left rewind (-5s): cursor 273000, offset = (300000 - 273000) - 22000 = 5000 (NOT 27000)
-            t.HandleCommand(TransportController.Command.Left)
-            m.assertEqual(t.cursorMs, 273000)
-            m.assertEqual(t.liveOffsetMs, 5000) ' baseline-relative: how far you rewound, not the raw distance
-            m.assertFalse(t.atLiveEdge)
-            ' the baseline is FROZEN once behind the edge: a second -5s grows the offset by another 5s
+            ' one Left rewind (-10s): cursor 268000, offset = (300000 - 268000) - 22000 = 10000 (NOT 32000)
             t.HandleCommand(TransportController.Command.Left)
             m.assertEqual(t.cursorMs, 268000)
-            m.assertEqual(t.liveOffsetMs, 10000) ' (300000 - 268000) - 22000
+            m.assertEqual(t.liveOffsetMs, 10000) ' baseline-relative: how far you rewound, not the raw distance
+            m.assertFalse(t.atLiveEdge)
+            ' the baseline is FROZEN once behind the edge: a second -10s grows the offset by another 10s
+            t.HandleCommand(TransportController.Command.Left)
+            m.assertEqual(t.cursorMs, 258000)
+            m.assertEqual(t.liveOffsetMs, 20000) ' (300000 - 258000) - 22000
             ' and it counts up as the edge advances while frozen (the min-gap can't grow)
             t.OnLiveEdge(303000) ' edge +3s
-            m.assertEqual(t.cursorMs, 268000) ' cursor frozen
-            m.assertEqual(t.liveOffsetMs, 13000) ' (303000 - 268000) - 22000
+            m.assertEqual(t.cursorMs, 258000) ' cursor frozen
+            m.assertEqual(t.liveOffsetMs, 23000) ' (303000 - 258000) - 22000
         end function
 
         @it("InstantReplay-back marks behind the edge and keeps playing (bug 7)")
@@ -1070,7 +1160,8 @@ namespace Tests
         ' SEEK-SETTLING FREEZE DEFER (INV-B12) — a transport entered while a play-through seek (commit /
         ' SponsorBlock skip / replay) is still in flight must NOT slam control=pause: that pause lands mid-seek
         ' and wedges the device (the reported bif-over-black bug). Defer the freeze; the coordinator's
-        ' EnforceTransportFreeze re-pauses once the seek reaches "playing". seekSettling models the in-flight seek.
+        ' EnforceTransportFreeze re-pauses after two target-position samples prove the seek stably landed.
+        ' seekSettling models the in-flight seek.
         ' =========================================================================================
         @describe("seek-settling freeze defer")
 
@@ -1079,7 +1170,9 @@ namespace Tests
             m.assertFalse(m.t.seekSettling)
             m.t.ForceIdleSeek(120000, true) ' SponsorBlock skip, keep playing -> in flight
             m.assertTrue(m.t.seekSettling)
-            m.t.MarkSeekSettled()
+            m.t.OnPosition(120000)
+            m.assertTrue(m.t.seekSettling, "one optimistic target sample is not enough")
+            m.t.OnPosition(120500)
             m.assertFalse(m.t.seekSettling)
             ' a plain scrub-enter freeze (pause + no seek) must NOT mark settling
             m.t.HandleCommand(TransportController.Command.Right)
@@ -1097,9 +1190,9 @@ namespace Tests
             m.t.HandleCommand(TransportController.Command.Right)
             m.assertEqual(m.t.transportMode, TransportController.Mode.Scrub) ' still enters scrub
             m.assertInvalid(m.t.TakeVideoIntent()) ' but the FREEZE was deferred (no pause)
-            ' the scrub still snaps + steps off the LAST KNOWN position (60000) — the seek to 120000 hasn't
-            ' landed yet (that IS the "press Right immediately" race), so cursor = 60000 grid + 2000 step.
-            m.assertEqual(m.t.cursorMs, 62000)
+            ' The external seek projects its target optimistically, so immediate scrub starts from the requested
+            ' destination rather than snapping back to the stale pre-seek position.
+            m.assertEqual(m.t.cursorMs, 130000)
         end function
 
         @it("entering scan while a seek is settling DEFERS the freeze")
@@ -1118,14 +1211,80 @@ namespace Tests
             m.assertEqual(m.t.TakeVideoIntent().control, TransportController.Control.Pause) ' the FREEZE
         end function
 
-        @it("after MarkSeekSettled (device reached playing), a fresh transport freezes normally again")
+        @it("two target-position confirmations settle the seek; a fresh transport then freezes normally")
         function _()
             m.t.ForceIdleSeek(120000, true)
             m.t.TakeVideoIntent()
-            m.t.MarkSeekSettled() ' coordinator: state reached "playing"
+            m.t.OnPosition(120000)
+            m.assertTrue(m.t.seekSettling)
+            m.t.OnPosition(121000)
             m.assertFalse(m.t.seekSettling)
             m.t.HandleCommand(TransportController.Command.Right)
             m.assertEqual(m.t.TakeVideoIntent().control, TransportController.Control.Pause)
+        end function
+
+        @it("the follow-up confirmation may advance past the target window at 2x playback")
+        function _()
+            m.t.ForceIdleSeek(120000, true)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(122000) ' first ~1s notification at 2x: within the 3s target window
+            m.assertTrue(m.t.seekSettling)
+            m.t.OnPosition(124000) ' next notification: stable and forward, but now 4s beyond the target
+            m.assertFalse(m.t.seekSettling)
+        end function
+
+        @it("stale and one-off target positions cannot settle an in-flight seek")
+        function _()
+            m.t.ForceIdleSeek(120000, true)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(60000)
+            m.t.OnPosition(120000)
+            m.assertTrue(m.t.seekSettling)
+            m.t.OnPosition(60000) ' a stale sample resets the confirmation
+            m.t.OnPosition(120000)
+            m.assertTrue(m.t.seekSettling)
+            m.t.OnPosition(120500)
+            m.assertFalse(m.t.seekSettling)
+        end function
+
+        @it("a newer seek supersedes the old target and restarts confirmation")
+        function _()
+            m.t.ForceIdleSeek(120000, true)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(120000) ' first confirmation for the old target
+            m.t.ForceIdleSeek(180000, true)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(120000)
+            m.t.OnPosition(180000)
+            m.assertTrue(m.t.seekSettling, "the old target and one new sample cannot combine")
+            m.t.OnPosition(181000)
+            m.assertFalse(m.t.seekSettling)
+        end function
+
+        @it("new content clears pending seek settlement state")
+        function _()
+            m.t.ForceIdleSeek(120000, true)
+            m.t.TakeVideoIntent()
+            m.t.OnPosition(120000)
+            m.assertTrue(m.t.seekSettling)
+            m.t.SetContent(false, 2000, true)
+            m.assertFalse(m.t.seekSettling)
+            m.t.HandleCommand(TransportController.Command.Right)
+            m.assertEqual(m.t.TakeVideoIntent().control, TransportController.Control.Pause)
+        end function
+
+        @it("a live-edge sentinel ignores stale behind-edge positions and settles near the effective edge")
+        function _()
+            t = m.LiveWindowed()
+            t.ForceIdleSeek(TransportController.LIVE_EDGE_SEEK_MS, false)
+            t.TakeVideoIntent()
+            t.OnPosition(250000)
+            t.OnPosition(250000)
+            m.assertTrue(t.seekSettling, "behind-edge samples cannot satisfy the live sentinel")
+            t.OnPosition(299000)
+            m.assertTrue(t.seekSettling)
+            t.OnPosition(300000)
+            m.assertFalse(t.seekSettling)
         end function
 
         ' =========================================================================================
@@ -1164,7 +1323,7 @@ namespace Tests
         @it("Left-step rewind clamps at the floor, not 0")
         function _()
             t = m.LiveWindowed()
-            for i = 1 to 20 ' 20 x -5s = -100s requested; only 60s (down to the floor) is available
+            for i = 1 to 20 ' 20 x -10s = -200s requested; only 60s (down to the floor) is available
                 t.HandleCommand(TransportController.Command.Left)
             end for
             m.assertEqual(t.cursorMs, 240000)
@@ -1225,7 +1384,7 @@ namespace Tests
 
         ' the doom setup: playing deep in the window, frozen by a rewind step, then the edge (and with
         ' it the floor) slides toward the frozen playhead until it sits inside the trigger margin.
-        ' edge 400->405s, window 300s -> floor 100->105s; frozen playhead at 120s.
+        ' edge 400->405s, window 300s -> floor 100->105s; frozen cursor at 110s.
         function LiveTailOvertaken() as object
             t = new TransportController.Controller()
             t.SetContent(true, 0, false)
@@ -1235,9 +1394,9 @@ namespace Tests
             t.OnPosition(400000) ' confirmed latency floor
             t.OnReady()
             t.OnPosition(120000) ' playing deep in the window (after a deep-rewind commit)
-            t.HandleCommand(TransportController.Command.Left) ' freeze; cursor steps to 115000
+            t.HandleCommand(TransportController.Command.Left) ' freeze; cursor steps to 110000
             t.TakeVideoIntent() ' drain the freeze pause
-            t.OnLiveEdge(405000) ' floor 105000: the frozen 120000 playhead is inside the trigger margin
+            t.OnLiveEdge(405000) ' floor 105000: the frozen 110000 cursor is inside the trigger margin
             return t
         end function
 
@@ -1252,7 +1411,7 @@ namespace Tests
         @it("ResolveLiveTail commits forward from the safe floor when the cursor sits at the tail")
         function _()
             t = m.LiveTailOvertaken()
-            m.assertEqual(t.cursorMs, 115000)
+            m.assertEqual(t.cursorMs, 110000)
             t.ResolveLiveTail()
             m.assertEqual(t.transportMode, TransportController.Mode.Idle)
             intent = t.TakeVideoIntent()
@@ -1268,7 +1427,7 @@ namespace Tests
         @it("ResolveLiveTail keeps a cursor the user had already moved above the safe floor")
         function _()
             t = m.LiveTailOvertaken()
-            for i = 1 to 11 ' step the cursor up from 115000: +5s per press to 170000
+            for i = 1 to 6 ' step the cursor up from 110000: +10s per press to 170000
                 t.HandleCommand(TransportController.Command.Right)
             end for
             m.assertEqual(t.cursorMs, 170000)
@@ -1382,7 +1541,7 @@ namespace Tests
         @it("live commits never finish (the edge is not an EOF)")
         function _()
             t = m.Live()
-            t.HandleCommand(TransportController.Command.Left) ' rewind 5s
+            t.HandleCommand(TransportController.Command.Left) ' rewind 10s
             t.TakeVideoIntent()
             before = t.finishSeq
             t.HandleCommand(TransportController.Command.Commit)

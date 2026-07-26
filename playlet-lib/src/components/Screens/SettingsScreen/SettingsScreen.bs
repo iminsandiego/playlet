@@ -195,6 +195,9 @@ function CreateRokuComponent(item as object, container as object) as object
     if node.hasField("description")
         node.description = Tr(item.description)
     end if
+    if node.hasField("options") and item.options <> invalid
+        node.options = item.options
+    end if
     return node
 end function
 
@@ -205,7 +208,10 @@ function OnKeyEvent(key as string, press as boolean) as boolean
         if m.currentNavigtionNode.isSameNode(m.navBar)
             m.currentNavigtionNode = m.firstCategory
         end if
-        ScrollTo(m.viewport, m.container, m.currentNavigtionNode.getParent(), m.scrollAnimation, m.scrollAnimationInterpolator)
+        ' Scroll against the focused control itself. The parent is the entire settings category and can be
+        ' taller than the viewport (Playback is the first example), which caused every Down press inside that
+        ' category to nudge the whole page even while the focused control was already fully visible.
+        ScrollTo(m.viewport, m.container, m.currentNavigtionNode, m.scrollAnimation, m.scrollAnimationInterpolator)
         return true
     end if
     return false
@@ -217,5 +223,5 @@ function OnFocusChange() as void
     end if
 
     NodeSetFocus(m.currentNavigtionNode, true)
-    ScrollTo(m.viewport, m.container, m.currentNavigtionNode.getParent(), m.scrollAnimation, m.scrollAnimationInterpolator)
+    ScrollTo(m.viewport, m.container, m.currentNavigtionNode, m.scrollAnimation, m.scrollAnimationInterpolator)
 end function

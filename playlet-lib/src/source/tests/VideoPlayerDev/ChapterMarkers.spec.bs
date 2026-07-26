@@ -1,0 +1,134 @@
+import "pkg:/source/utils/ChapterMarkers.bs"
+
+namespace Tests
+
+    @suite
+    class ChapterMarkersTests extends Rooibos.BaseTestSuite
+
+        @describe("chapter marker parsing")
+
+        @it("extracts structured YouTube chapter markers")
+        function _()
+            payload = {
+                playerOverlays: {
+                    playerOverlayRenderer: {
+                        decoratedPlayerBarRenderer: {
+                            decoratedPlayerBarRenderer: {
+                                playerBar: {
+                                    multiMarkersPlayerBarRenderer: {
+                                        markersMap: [{
+                                            key: "DESCRIPTION_CHAPTERS"
+                                            value: {
+                                                chapters: [
+                                                    { chapterRenderer: { timeRangeStartMillis: 0, title: { simpleText: "Intro" } } }
+                                                    { chapterRenderer: { timeRangeStartMillis: 60000, title: { runs: [{ text: "Main" }] } } }
+                                                    { chapterRenderer: { timeRangeStartMillis: 120000, title: { simpleText: "Wrap" } } }
+                                                ]
+                                            }
+                                        }]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            chapters = ChapterMarkers.FromPlayerResponse(payload, "", 180000)
+            m.assertEqual(chapters.Count(), 3)
+            m.assertEqual(chapters[1].startMs, 60000)
+            m.assertEqual(chapters[1].title, "Main")
+        end function
+
+        @it("falls back to timestamped descriptions")
+        function _()
+            description = "Welcome" + Chr(10) + "0:00 Intro" + Chr(10) + "01:15 - Topic" + Chr(10) + "[1:02:03] Finale"
+            chapters = ChapterMarkers.FromPlayerResponse({}, description, 4000000)
+            m.assertEqual(chapters.Count(), 3)
+            m.assertEqual(chapters[0].startMs, 0)
+            m.assertEqual(chapters[1].startMs, 75000)
+            m.assertEqual(chapters[1].title, "Topic")
+            m.assertEqual(chapters[2].startMs, 3723000)
+        end function
+
+        @it("prefers a complete description fallback over incomplete structured data")
+        function _()
+            payload = {
+                playerOverlays: {
+                    playerOverlayRenderer: {
+                        decoratedPlayerBarRenderer: {
+                            playerBar: {
+                                multiMarkersPlayerBarRenderer: {
+                                    markersMap: [{
+                                        value: {
+                                            chapters: [
+                                                { chapterRenderer: { timeRangeStartMillis: 0, title: { simpleText: "Only one" } } }
+                                            ]
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            chapters = ChapterMarkers.FromPlayerResponse(payload, "0:00 Intro" + Chr(10) + "1:00 Main", 120000)
+            m.assertEqual(chapters.Count(), 2)
+            m.assertEqual(chapters[1].startMs, 60000)
+            m.assertEqual(chapters[1].title, "Main")
+        end function
+
+        @it("ignores malformed structured entries without aborting valid chapters")
+        function _()
+            markers = ChapterMarkers.ParseStructured({
+                playerOverlays: {
+                    playerOverlayRenderer: {
+                        decoratedPlayerBarRenderer: {
+                            playerBar: {
+                                multiMarkersPlayerBarRenderer: {
+                                    markersMap: [
+                                        "invalid"
+                                        {
+                                            value: {
+                                                chapters: [
+                                                    "invalid"
+                                                    { chapterRenderer: { timeRangeStartMillis: 0, title: { simpleText: "Intro" } } }
+                                                ]
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            m.assertEqual(markers.Count(), 1)
+            m.assertEqual(markers[0].title, "Intro")
+        end function
+
+        @it("sorts, deduplicates, and drops boundaries outside the video")
+        function _()
+            chapters = ChapterMarkers.Normalize([
+                { startMs: 90000, title: "Third" }
+                { startMs: 0, title: "First" }
+                { startMs: 30000, title: "Second" }
+                { startMs: 30000, title: "Duplicate" }
+                { startMs: 120000, title: "At end" }
+                { startMs: -1, title: "Invalid" }
+            ], 120000)
+            m.assertEqual(chapters.Count(), 3)
+            m.assertEqual(chapters[0].title, "First")
+            m.assertEqual(chapters[1].title, "Second")
+            m.assertEqual(chapters[2].title, "Third")
+        end function
+
+        @it("rejects malformed timestamps")
+        function _()
+            m.assertEqual(ChapterMarkers.ParseTimestampMs("1:75"), -1)
+            m.assertEqual(ChapterMarkers.ParseTimestampMs("one:20"), -1)
+            m.assertEqual(ChapterMarkers.ParseTimestampMs("1:02:03"), 3723000)
+        end function
+
+    end class
+
+end namespace

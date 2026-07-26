@@ -5,7 +5,7 @@
 // Requires the lib built with `#const USE_DEV_PLAYER = true` — the specs assert #VideoPlayer is VideoPlayerDev.
 import { spawnSync } from 'node:child_process';
 
-const SPECS = ['transport', 'buttonrow', 'skipbuttons', 'quality', 'features', 'stats', 'bif', 'adversarial', 'live', 'sbskip'];
+const SPECS = ['transport', 'buttonrow', 'skipbuttons', 'quality', 'appsettings', 'chapters', 'features', 'stats', 'bif', 'adversarial', 'live', 'sbskip'];
 
 const filters = process.argv.slice(2).map((f) => f.toLowerCase());
 const selected = filters.length === 0 ? SPECS : SPECS.filter((s) => filters.some((f) => s.includes(f)));

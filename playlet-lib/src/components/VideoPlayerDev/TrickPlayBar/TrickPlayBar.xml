@@ -16,6 +16,8 @@
         <field id="glyph" type="integer" value="0" />
         <field id="forceLiveBadge" type="boolean" value="false" />
         <field id="focused" type="boolean" value="false" />
+        <field id="chapters" type="array" />
+        <field id="showChapterMarkers" type="boolean" value="true" />
 
         <!-- SponsorBlock (off by default): track image is aliased; fill tint and chapter label drive code/alias. -->
         <field id="sbBarUri" type="uri" alias="trackBg.uri" />
@@ -30,6 +32,8 @@
         <Poster id="trackFill"
             uri="/RokuOS/Artwork/SceneGraph/FixedTheme/Base/FHD/osd_sliderControl_small.9.png"
             width="1144" height="12" blendColor="0xFF1C30FF" clippingRect="[0,0,0,12]" loadDisplayMode="noScale" />
+        <!-- Thin boundaries over the fill/background. Children are generated only when chapter data exists. -->
+        <Group id="chapterMarkers" />
         <!-- the cursor: a 12px dot that swells half-again while the bar tier holds focus. PositionPlayhead
              moves it; the grow/shrink animations scale it about its center. -->
         <Poster id="playhead"
@@ -70,5 +74,21 @@
         </Label>
         <Label id="chapterLabel" translation="[111, 25]" width="350" height="25"
             color="0xFEFEFEFF" horizAlign="center" vertAlign="center" font="font:SmallestSystemFont" />
+        <!-- Contextual key hint for an idle, focused live bar that is behind the edge. Only the remote key
+             gets a compact outline; the action remains plain text instead of looking like a large button. -->
+        <Group id="goLiveAction" visible="false" translation="[944,51]">
+            <Poster id="goLiveKeyBackground"
+                uri="pkg:/images/white-border.$$RES$$.9.png"
+                width="48" height="28">
+                <Label id="goLiveKeyLabel" text="OK" width="48" height="28"
+                    color="0xFEFEFEFF" horizAlign="center" vertAlign="center">
+                    <Font role="font" uri="font:MediumSystemFontFile" size="16" />
+                </Label>
+            </Poster>
+            <Label id="goLiveLabel" translation="[58,0]" width="142" height="28"
+                color="0xFEFEFEFF" horizAlign="left" vertAlign="center">
+                <Font role="font" uri="font:MediumSystemFontFile" size="19" />
+            </Label>
+        </Group>
     </children>
 </component>
