@@ -1,5 +1,0 @@
-<component name="PlaybackSettingsActionButton" extends="ButtonEx">
-    <interface>
-        <field id="navKey" type="string" alwaysNotify="true" />
-    </interface>
-</component>
