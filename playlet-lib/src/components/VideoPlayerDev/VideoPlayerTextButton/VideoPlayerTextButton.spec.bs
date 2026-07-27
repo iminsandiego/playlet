@@ -12,15 +12,26 @@ namespace Tests
             label = m.top.findNode("label")
 
             m.top.focused = true
-            m.assertEqual(background.color, m.top.focusedBackgroundColor)
+            m.assertEqual(background.blendColor, m.top.focusedBackgroundColor)
             m.assertEqual(label.color, m.top.focusedTextColor)
 
             m.top.active = true
             m.assertEqual(label.color, m.top.focusedActiveTextColor)
 
             m.top.disabled = true
-            m.assertEqual(background.color, m.top.disabledBackgroundColor)
+            m.assertEqual(background.blendColor, m.top.disabledBackgroundColor)
             m.assertEqual(label.color, m.top.disabledTextColor)
+        end function
+
+        @it("uses the shared antialiased player-button artwork as a labeled circle")
+        function _()
+            background = m.top.findNode("background")
+            label = m.top.findNode("label")
+            m.assertEqual(background.subtype(), "Poster")
+            m.assertEqual(background.uri, "pkg:/images/icons/player/white-circle.png")
+            m.assertEqual(background.width, 42)
+            m.assertEqual(background.height, 42)
+            m.assertTrue(label.getParent().isSameNode(background.getParent()))
         end function
 
         @describe("nudge")

@@ -1,8 +1,8 @@
 <component name="VideoPlayerTextButton" extends="Group">
-    <!-- Compact text companion to VideoPlayerButton. It uses the same virtual-focus/disabled/nudge contract,
-         but exposes buttonWidth so ButtonRow can account for its wider quality label. -->
+    <!-- Compact value-button companion to VideoPlayerButton. It uses the same 42px circle and
+         virtual-focus/disabled/nudge contract as the icon controls. -->
     <interface>
-        <field id="buttonWidth" type="integer" value="64" />
+        <field id="buttonWidth" type="integer" value="42" />
         <field id="text" type="string" alias="label.text" />
 
         <field id="backgroundColor" type="color" value="#3C3C3C" />
@@ -21,11 +21,14 @@
     </interface>
     <children>
         <Group id="anchor">
-            <Rectangle id="background" width="64" height="42" color="#3C3C3C">
-                <Label id="label" width="64" height="42" horizAlign="center" vertAlign="center">
-                    <Font role="font" uri="font:SmallBoldSystemFont" size="16" />
-                </Label>
-            </Rectangle>
+            <!-- Keep the artwork square so it renders as the same circle used by the adjacent icon buttons.
+                 The label is a sibling overlay because some Roku models do not reliably paint children of Poster. -->
+            <Poster id="background" uri="pkg:/images/icons/player/white-circle.png"
+                width="42" height="42" blendColor="#3C3C3C" />
+            <Label id="label" width="42" height="42" translation="[0,1]"
+                horizAlign="center" vertAlign="center">
+                <Font role="font" uri="font:SystemFontFile" size="13" />
+            </Label>
         </Group>
         <Animation id="nudgeAnim" optional="true" duration="0.15">
             <Vector2DFieldInterpolator id="nudgeScale"

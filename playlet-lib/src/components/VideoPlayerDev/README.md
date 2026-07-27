@@ -27,7 +27,8 @@ A thin coordinator over a pure-logic brain and projection-only renderers:
   reports, and the playback summary sent on close (startup, play starts, playing and underrun time, errors, INV-D1
   heals and tail resolves, how it ended). The coordinator reports what happens; it holds no telemetry code.
 - **Renderers** (`TrickPlayBar/`, `BifDisplay/`, `LargePause/`, `LoadBufferSpinner/`, `ButtonRow/`,
-  `VideoPlayerButton/`) — SceneGraph components that are pure projections of scalar input fields.
+  `VideoPlayerButton/`, `VideoPlayerTextButton/`) — SceneGraph components that are pure projections of scalar
+  input fields.
   Each self-derives its own visibility from `transportMode` (a commit sets `transportMode=idle` and the bif
   hides itself, with no external hide call). The title/metadata labels and the shared `Clock` component live
   directly in a Group under Chrome (the clock self-ticks once a minute — no coordinator plumbing).
@@ -36,10 +37,12 @@ A thin coordinator over a pure-logic brain and projection-only renderers:
 
 The center cluster intentionally contains only Previous, Play/Pause, and Next. Left/Right on the focused
 timeline remain the primary preview-seek interaction, so duplicate fixed rewind/forward buttons are omitted.
-Every focused button has an action label; Playback settings combines the existing quality selector with
-immediately-applied VOD playback speed. Live playback exposes a contextual **Go live** action on the focused
-timeline while behind the edge. VOD chapter boundaries are read from structured Innertube data, with
-timestamped descriptions as a fallback, and can be hidden under Playback settings in the app.
+Every focused button has an action label. Quality and speed are compact value buttons on the row: quality
+opens the existing saved-default selector directly, while speed opens a current-video-only selector and resets
+to the configured default on the next video. Playback speed is disabled for live content. Live playback
+exposes a contextual **Go live** action on the focused timeline while behind the edge. VOD chapter boundaries
+are read from structured Innertube data, with timestamped descriptions as a fallback, and can be hidden under
+Playback settings in the app.
 
 ## Testing
 

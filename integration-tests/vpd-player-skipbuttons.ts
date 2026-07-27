@@ -29,14 +29,14 @@ async function focusPlayButton(): Promise<void> {
 (async () => {
     await launchVod(CONTENT_ID);
 
-    group('the reduced row has eight controls and no intermediate seek buttons');
+    group('the reduced row has nine controls and no intermediate seek buttons');
     await expectField('#Chrome.opacity', 0, 7000);
     await focusPlayButton();
-    await expectField('#buttonRow.buttonCount', 8);
+    await expectField('#buttonRow.buttonCount', 9);
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.playPause); // disabled Previous is skipped and clamps
     await press(Key.Right);
-    await expectField('#buttonRow.focusedIndex', Button.playbackSettings); // disabled Next is skipped directly
+    await expectField('#buttonRow.focusedIndex', Button.quality); // disabled Next is skipped directly
 
     group('Left/Right use fixed 10-second steps even with 5-second storyboards');
     await odc.setValue({ base: 'scene', keyPath: '#VideoPlayer.seek', value: 60 });

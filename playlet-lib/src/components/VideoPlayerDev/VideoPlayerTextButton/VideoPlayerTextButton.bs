@@ -34,20 +34,20 @@ end function
 
 function Repaint() as void
     if m.top.disabled
-        m.background.color = m.top.disabledBackgroundColor
+        m.background.blendColor = m.top.disabledBackgroundColor
         m.label.color = m.top.disabledTextColor
         return
     end if
 
     if m.top.focused
-        m.background.color = m.top.focusedBackgroundColor
+        m.background.blendColor = m.top.focusedBackgroundColor
         if m.top.active
             m.label.color = m.top.focusedActiveTextColor
         else
             m.label.color = m.top.focusedTextColor
         end if
     else
-        m.background.color = m.top.backgroundColor
+        m.background.blendColor = m.top.backgroundColor
         if m.top.active
             m.label.color = m.top.activeTextColor
         else

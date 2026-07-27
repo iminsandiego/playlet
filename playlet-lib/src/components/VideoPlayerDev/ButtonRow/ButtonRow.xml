@@ -19,9 +19,11 @@
         <field id="playing" type="boolean" value="true" /> <!-- selects the play vs pause icon -->
         <field id="previousEnabled" type="boolean" value="false" />
         <field id="nextEnabled" type="boolean" value="false" />
-        <!-- Current values appear in the playback-settings focus label. -->
+        <!-- Current values are shown directly on compact player-bar buttons. -->
         <field id="qualityLabel" type="string" value="" />
+        <field id="qualityDescription" type="string" value="" />
         <field id="speedLabel" type="string" value="" />
+        <field id="speedEnabled" type="boolean" value="true" />
         <field id="captionsEnabled" type="boolean" value="false" /> <!-- any global mode except Off -->
         <field id="statsEnabled" type="boolean" value="false" /> <!-- selects + accents the stats icon -->
         <field id="bookmarkAvailable" type="boolean" value="false" /> <!-- requires a current videoId -->
@@ -45,8 +47,8 @@
         </Group>
         <!-- Feature controls, right-aligned to the trackbar's right edge (x=1212). -->
         <Group id="RightCluster">
-            <VideoPlayerButton id="PlaybackSettingsButton"
-                iconUri="pkg:/images/icons/player/quality.png" />
+            <VideoPlayerTextButton id="QualityButton" text="Auto" />
+            <VideoPlayerTextButton id="SpeedButton" text="1x" />
             <VideoPlayerButton id="CaptionsButton"
                 iconUri="pkg:/images/icons/player/cc-off.png"
                 iconUri2="pkg:/images/icons/player/cc-on.png" />

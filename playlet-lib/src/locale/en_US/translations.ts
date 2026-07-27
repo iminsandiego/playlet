@@ -1061,10 +1061,6 @@
         <translation>Next video</translation>
     </message>
     <message>
-        <source>Playback settings</source>
-        <translation>Playback settings</translation>
-    </message>
-    <message>
         <source>Default</source>
         <translation>Default</translation>
     </message>
