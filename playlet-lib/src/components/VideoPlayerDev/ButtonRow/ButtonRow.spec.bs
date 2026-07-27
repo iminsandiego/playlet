@@ -16,6 +16,7 @@ namespace Tests
             m.top.nextEnabled = false
             m.top.qualityLabel = "Auto"
             m.top.speedLabel = "1x"
+            m.top.speedEnabled = true
             m.top.captionsEnabled = false
             m.top.statsEnabled = false
             m.top.bookmarkAvailable = false
@@ -38,11 +39,11 @@ namespace Tests
 
         @it("exposes its button count and auto-positions the clusters (centered + right-aligned)")
         function _()
-            m.assertEqual(m.top.buttonCount, 8)
-            ' The three-button transport cluster centers on 640. The five-button feature cluster
+            m.assertEqual(m.top.buttonCount, 9)
+            ' The three-button transport cluster centers on 640. The six-button feature cluster
             ' remains right-aligned to 1212.
             m.assertEqual(m.top.findNode("CenterCluster").translation[0], 557.0)
-            m.assertEqual(m.top.findNode("RightCluster").translation[0], 922.0)
+            m.assertEqual(m.top.findNode("RightCluster").translation[0], 860.0)
         end function
 
         @describe("virtual-focus highlight")
@@ -53,7 +54,8 @@ namespace Tests
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("NextButton").focused)
-            m.assertFalse(m.top.findNode("PlaybackSettingsButton").focused)
+            m.assertFalse(m.top.findNode("QualityButton").focused)
+            m.assertFalse(m.top.findNode("SpeedButton").focused)
             m.assertFalse(m.top.findNode("CaptionsButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("BookmarkButton").focused)
@@ -73,12 +75,12 @@ namespace Tests
             m.assertTrue(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("MinimizeButton").focused)
-            m.top.focusedIndex = 5
+            m.top.focusedIndex = 6
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertTrue(m.top.findNode("StatsButton").focused)
             m.assertFalse(m.top.findNode("MinimizeButton").focused)
-            m.top.focusedIndex = 7
+            m.top.focusedIndex = 8
             m.assertFalse(m.top.findNode("PreviousButton").focused)
             m.assertFalse(m.top.findNode("PlayPauseButton").focused)
             m.assertFalse(m.top.findNode("StatsButton").focused)
@@ -90,7 +92,7 @@ namespace Tests
         @it("nudge pulses the focused button's animation")
         function _()
             m.top.rowFocused = true
-            m.top.focusedIndex = 7
+            m.top.focusedIndex = 8
             anim = m.top.findNode("MinimizeButton").findNode("nudgeAnim")
             anim.control = "stop"
             m.top.nudge = true
@@ -153,13 +155,29 @@ namespace Tests
             m.assertTrue(stats.active)
         end function
 
-        @describe("playback settings control")
+        @describe("direct playback controls")
 
-        @it("uses the standard round button with a recognizable settings icon")
+        @it("shows the current quality and speed on compact value pills")
         function _()
-            settings = m.top.findNode("PlaybackSettingsButton")
-            m.assertEqual(settings.subtype(), "VideoPlayerButton")
-            m.assertEqual(settings.iconUri, "pkg:/images/icons/player/quality.png")
+            quality = m.top.findNode("QualityButton")
+            speed = m.top.findNode("SpeedButton")
+            m.assertEqual(quality.subtype(), "VideoPlayerTextButton")
+            m.assertEqual(speed.subtype(), "VideoPlayerTextButton")
+            m.assertEqual(quality.text, "Auto")
+            m.assertEqual(speed.text, "1x")
+
+            m.top.qualityLabel = "4K"
+            m.top.speedLabel = "1.5x"
+            m.assertEqual(quality.text, "4K")
+            m.assertEqual(speed.text, "1.5x")
+        end function
+
+        @it("disables speed when the current content cannot change playback rate")
+        function _()
+            m.top.speedEnabled = false
+            m.assertTrue(m.top.findNode("SpeedButton").disabled)
+            m.top.speedEnabled = true
+            m.assertFalse(m.top.findNode("SpeedButton").disabled)
         end function
 
         @describe("focus labels")
@@ -178,15 +196,16 @@ namespace Tests
             m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.Play))
         end function
 
-        @it("summarizes quality and speed on playback settings")
+        @it("labels quality and speed independently with their current values")
         function _()
             m.top.rowFocused = true
-            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
             m.top.qualityLabel = "4K"
+            m.top.qualityDescription = "2160p"
             m.top.speedLabel = "1.5x"
-            m.assertTrue(m.top.focusedLabel.InStr(Tr(Locale.VideoPlayer.PlaybackSettings)) >= 0)
-            m.assertTrue(m.top.focusedLabel.InStr("4K") >= 0)
-            m.assertTrue(m.top.focusedLabel.InStr("1.5x") >= 0)
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.Quality
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.Settings.DefaultQuality) + ": 2160p")
+            m.top.focusedIndex = PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed
+            m.assertEqual(m.top.focusedLabel, Tr(Locale.VideoPlayer.SpeedForThisVideo) + ": 1.5x")
         end function
 
         @it("describes toggle actions rather than only naming their icons")

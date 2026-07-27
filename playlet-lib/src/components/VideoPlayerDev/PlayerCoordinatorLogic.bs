@@ -50,11 +50,12 @@ namespace PlayerCoordinatorLogic
         Previous = 0
         PlayPause = 1
         NextVideo = 2
-        PlaybackSettings = 3
-        Captions = 4
-        Stats = 5
-        Bookmark = 6
-        Minimize = 7
+        Quality = 3
+        PlaybackSpeed = 4
+        Captions = 5
+        Stats = 6
+        Bookmark = 7
+        Minimize = 8
     end enum
 
     ' The two focus targets above/at the trackbar: the bar itself (Left/Right scrub, the cursor grows) and the
@@ -175,6 +176,8 @@ namespace PlayerCoordinatorLogic
             return hasPrevious
         else if index = PlayerButton.NextVideo
             return hasNext
+        else if index = PlayerButton.PlaybackSpeed
+            return not _isLive
         else if index = PlayerButton.Bookmark
             return bookmarkAvailable
         end if
@@ -198,16 +201,23 @@ namespace PlayerCoordinatorLogic
         return current
     end function
 
-    ' Compact standing label for the multi-quality preference. The selector retains the full comma-separated
-    ' value; the player button shows the highest-priority entry (and the familiar 4K label for 2160p).
-    function QualityLabel(value as dynamic) as string
+    ' Full standing label for the highest-priority entry in the multi-quality preference.
+    function QualityDescription(value as dynamic) as string
         quality = ValidString(value).Trim()
         if quality = "" or quality = "auto"
             return "Auto"
         end if
-        quality = quality.Split(",")[0]
+        return quality.Split(",")[0]
+    end function
+
+    ' Compact label for the 42px player-bar button. Keep the full value in the focus label.
+    function QualityLabel(value as dynamic) as string
+        quality = QualityDescription(value)
         if quality = "2160p"
             return "4K"
+        end if
+        if quality.EndsWith("p")
+            return quality.Left(quality.Len() - 1)
         end if
         return quality
     end function
@@ -224,7 +234,7 @@ namespace PlayerCoordinatorLogic
         return speed + "x"
     end function
 
-    ' One runtime source of truth shared by playback-speed validation and the in-player settings panel.
+    ' One runtime source of truth shared by playback-speed validation and the direct in-player selector.
     function PlaybackSpeedValues() as object
         return ["0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
     end function

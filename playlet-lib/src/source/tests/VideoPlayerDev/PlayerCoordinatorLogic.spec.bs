@@ -228,6 +228,15 @@ namespace Tests
         ' =========================================================================================
         @describe("button row navigation")
 
+        @it("uses compact circle labels without losing the full quality description")
+        function _()
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("auto"), "Auto")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("2160p,1440p"), "4K")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("1440p,1080p"), "1440")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("1080p"), "1080")
+            m.assertEqual(PlayerCoordinatorLogic.QualityDescription("1440p,1080p"), "1440p")
+        end function
+
         @it("Left/Right move the focused button and clamp at the ends")
         function _()
             m.assertEqual(PlayerCoordinatorLogic.NextButtonIndex(0, RemoteKeys.Right, 2), 1)
@@ -242,20 +251,20 @@ namespace Tests
         @it("skips disabled queue controls while preserving row order")
         function _()
             play = PlayerCoordinatorLogic.PlayerButton.PlayPause
-            settings = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
+            quality = PlayerCoordinatorLogic.PlayerButton.Quality
             previous = PlayerCoordinatorLogic.PlayerButton.Previous
 
             ' With a previous item, Left from Play reaches it; otherwise the focus clamps.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 8, true, false, false, false), previous)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 8, false, false, false, false), play)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 9, true, false, false, false), previous)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 9, false, false, false, false), play)
 
             ' At both queue ends with no video id, skip Next and Bookmark.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 8, false, true, false, false), settings)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(settings, RemoteKeys.Left, 8, false, true, false, false), play)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.Stats, RemoteKeys.Right, 8, false, true, false, false), PlayerCoordinatorLogic.PlayerButton.Minimize)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 9, false, true, false, false), quality)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(quality, RemoteKeys.Left, 9, false, true, false, false), play)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.Stats, RemoteKeys.Right, 9, false, true, false, false), PlayerCoordinatorLogic.PlayerButton.Minimize)
 
             ' An available Next item remains directly adjacent to Play.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 8, false, true, true, false), PlayerCoordinatorLogic.PlayerButton.NextVideo)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 9, false, true, true, false), PlayerCoordinatorLogic.PlayerButton.NextVideo)
         end function
 
         @it("the availability decision matches queue ends and bookmark semantics")
@@ -264,6 +273,8 @@ namespace Tests
             m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, true, false, false, false))
             m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, true, false, false, false))
             m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, false, true, true, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, false, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, true, false, false))
             m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Captions, false, true, false, false))
             m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, true, false, true, false))
             m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, false, true, false, true))

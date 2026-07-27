@@ -41,13 +41,22 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await expectField('#buttonRow.focusedLabel', 'Pause');
     await expectField('#trickPlayBar.focused', false);
     await press(Key.Right);
-    await expectField('#buttonRow.focusedIndex', Button.playbackSettings);
-    await expectField('#PlaybackSettingsButton.focused', true);
-    await expectPred('#buttonRow.focusedLabel', (v) => typeof v === 'string' && v.includes('Playback settings') && v.includes('x'), 'labels settings with current values');
+    await expectField('#buttonRow.focusedIndex', Button.quality);
+    await expectField('#QualityButton.focused', true);
+    await expectPred(
+        '#buttonRow.focusedLabel',
+        (v) => typeof v === 'string' && v.includes('quality') && v.includes(':') && !v.endsWith(': '),
+        'labels the saved quality value',
+    );
+    await press(Key.Right);
+    await expectField('#buttonRow.focusedIndex', Button.speed);
+    await expectField('#SpeedButton.focused', true);
+    await expectPred('#buttonRow.focusedLabel', (v) => typeof v === 'string' && v.includes('Speed for this video') && v.includes('x'), 'labels the current-video speed');
+    await expectField('#QualityButton.focused', false);
     await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.captions);
     await expectField('#CaptionsButton.focused', true);
-    await expectField('#PlaybackSettingsButton.focused', false);
+    await expectField('#SpeedButton.focused', false);
     await expectField('#PlayPauseButton.focused', false);
     await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.stats);
@@ -70,7 +79,9 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.captions);
     await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.playbackSettings);
+    await expectField('#buttonRow.focusedIndex', Button.speed);
+    await press(Key.Left);
+    await expectField('#buttonRow.focusedIndex', Button.quality);
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
     await press(Key.Left);
@@ -110,7 +121,8 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await waitFor('#trickPlayBar.focused', (v) => v === true, 'trackbar focused on reveal');
     await press(Key.Up); // -> buttons tier, play/pause (doubled defensively, as above)
     await press(Key.Up);
-    await press(Key.Right); // -> Playback settings (skips disabled Next)
+    await press(Key.Right); // -> Quality (skips disabled Next)
+    await press(Key.Right); // -> Speed
     await press(Key.Right); // -> Captions
     await press(Key.Right); // -> Stats
     await press(Key.Right); // -> Bookmark

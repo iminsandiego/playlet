@@ -90,8 +90,9 @@ async function waitForBookmark(expected: boolean, timeoutMs = 10_000): Promise<b
         await expectField('#buttonRow.rowFocused', true);
         await expectField('#buttonRow.focusedIndex', Button.playPause);
 
-        await press(Key.Right); // skip disabled Next -> Playback settings
-        await press(Key.Right); // Playback settings -> Captions
+        await press(Key.Right); // skip disabled Next -> Quality
+        await press(Key.Right); // Quality -> Speed
+        await press(Key.Right); // Speed -> Captions
         await expectField('#buttonRow.focusedIndex', Button.captions);
         await expectField('#CaptionsButton.focused', true);
         await expectField('#buttonRow.captionsEnabled', initialCaptionMode !== 'Off');

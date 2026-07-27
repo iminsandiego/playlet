@@ -344,7 +344,6 @@ namespace Locale
         Play = "Play"
         Pause = "Pause"
         NextVideo = "Next video"
-        PlaybackSettings = "Playback settings"
         SpeedForThisVideo = "Speed for this video"
         Default = "Default"
         TurnCaptionsOn = "Turn captions on"

@@ -16,7 +16,8 @@ function Init()
         m.top.findNode("PreviousButton")
         m.top.findNode("PlayPauseButton")
         m.top.findNode("NextButton")
-        m.top.findNode("PlaybackSettingsButton")
+        m.top.findNode("QualityButton")
+        m.top.findNode("SpeedButton")
         m.top.findNode("CaptionsButton")
         m.top.findNode("StatsButton")
         m.top.findNode("BookmarkButton")
@@ -28,7 +29,7 @@ function Init()
     LayoutClusters()
     m.top.buttonCount = m.buttons.Count() ' coordinator reads this to clamp focus
 
-    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "nextEnabled", "qualityLabel", "speedLabel", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
+    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "nextEnabled", "qualityLabel", "qualityDescription", "speedLabel", "speedEnabled", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
         m.top.ObserveField(field, FuncName(Repaint))
     end for
     m.top.ObserveField("nudge", FuncName(OnNudge))
@@ -91,12 +92,15 @@ function Repaint() as void
     m.buttons[0].disabled = not m.top.previousEnabled
     m.buttons[1].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
     m.buttons[2].disabled = not m.top.nextEnabled
-    m.buttons[4].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
-    m.buttons[4].active = m.top.captionsEnabled
-    m.buttons[5].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
-    m.buttons[5].active = m.top.statsEnabled
-    m.buttons[6].disabled = not m.top.bookmarkAvailable
-    m.buttons[6].active = m.top.bookmarked
+    m.buttons[3].text = m.top.qualityLabel
+    m.buttons[4].text = m.top.speedLabel
+    m.buttons[4].disabled = not m.top.speedEnabled
+    m.buttons[5].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
+    m.buttons[5].active = m.top.captionsEnabled
+    m.buttons[6].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
+    m.buttons[6].active = m.top.statsEnabled
+    m.buttons[7].disabled = not m.top.bookmarkAvailable
+    m.buttons[7].active = m.top.bookmarked
 
     for i = 0 to m.buttons.Count() - 1
         m.buttons[i].focused = m.top.rowFocused and i = m.top.focusedIndex
@@ -117,8 +121,10 @@ function FocusLabelFor(index as integer) as string
         return Tr(Locale.VideoPlayer.Play)
     else if index = PlayerCoordinatorLogic.PlayerButton.NextVideo
         return Tr(Locale.VideoPlayer.NextVideo)
-    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
-        return Tr(Locale.VideoPlayer.PlaybackSettings) + "  " + m.top.qualityLabel + "  " + m.top.speedLabel
+    else if index = PlayerCoordinatorLogic.PlayerButton.Quality
+        return Tr(Locale.Settings.DefaultQuality) + ": " + m.top.qualityDescription
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed
+        return Tr(Locale.VideoPlayer.SpeedForThisVideo) + ": " + m.top.speedLabel
     else if index = PlayerCoordinatorLogic.PlayerButton.Captions
         if m.top.captionsEnabled
             return Tr(Locale.VideoPlayer.TurnCaptionsOff)

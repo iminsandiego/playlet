@@ -59,9 +59,9 @@ function Initialize()
 
     m.errorDialogNode = invalid
     m.statsForNerds = invalid
-    m.playbackSettingsPanel = invalid
     m.qualitySelector = invalid
-    ' Per-video playback speed. Invalid means the configured default is effective; a player-panel choice lives
+    m.speedSelector = invalid
+    ' Per-video playback speed. Invalid means the configured default is effective; a player selector choice lives
     ' only until PlayWithContent starts the next video.
     m.currentPlaybackSpeedOverride = invalid
     m.statsEnabled = false
@@ -188,12 +188,14 @@ function OnNodeReady()
         m.bookmarksService.ObserveFieldScoped("contentChange", FuncName(OnBookmarksChange))
     end if
     if m.top.preferences <> invalid
+        m.top.preferences.ObserveFieldScoped("playback.preferred_quality", FuncName(OnPreferredQualityChange))
         m.top.preferences.ObserveFieldScoped("playback.preferred_speed", FuncName(OnPreferredSpeedChange))
         m.top.preferences.ObserveFieldScoped("playback.show_chapter_markers", FuncName(OnChapterMarkerPreferenceChange))
     end if
 
     SyncCaptionState()
     SyncBookmarkState()
+    OnPreferredQualityChange()
     OnPreferredSpeedChange()
     OnChapterMarkerPreferenceChange()
     SetupStatsForNerds()
@@ -594,8 +596,11 @@ function ActivateButton(index as integer) as void
         HideChromeNow()
         m.videoQueue.next = true
         return
-    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
-        OpenPlaybackSettings()
+    else if index = PlayerCoordinatorLogic.PlayerButton.Quality
+        OpenQualitySelector()
+        return
+    else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed
+        OpenPlaybackSpeedSelector()
         return
     else if index = PlayerCoordinatorLogic.PlayerButton.Captions
         ToggleCaptions()
@@ -624,8 +629,9 @@ function SyncFocus() as void
     m.buttonRow.playing = (m.top.state = VideoState.Playing)
     m.buttonRow.previousEnabled = HasPreviousQueueItem()
     m.buttonRow.nextEnabled = HasNextQueueItem()
-    m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(CurrentQualityPreference())
+    OnPreferredQualityChange()
     m.buttonRow.speedLabel = PlayerCoordinatorLogic.PlaybackSpeedLabel(CurrentPlaybackSpeedValue())
+    m.buttonRow.speedEnabled = PlaybackSpeedAvailable()
     m.buttonRow.captionsEnabled = m.captionsEnabled
     m.buttonRow.statsEnabled = m.statsEnabled
     m.buttonRow.bookmarkAvailable = m.bookmarkAvailable
@@ -658,8 +664,9 @@ function OnQueueAvailabilityChange(_event as object) as void
 end function
 
 '===============================================================================
-' PLAYBACK SETTINGS — one player-owned modal for the honest global quality default and current-video speed.
-' Quality still uses the upstream multi-select preference selector; speed never mutates that global default.
+' DIRECT PLAYBACK CONTROLS — the player bar exposes quality and current-video speed as separate value pills.
+' Each opens its existing focused selector. Quality retains the upstream multi-select preference semantics;
+' speed is a per-video override and never mutates the global default.
 '===============================================================================
 function CurrentQualityPreference() as string
     if m.top.preferences = invalid
@@ -672,95 +679,30 @@ function CurrentQualityPreference() as string
     return value
 end function
 
-function OpenPlaybackSettings() as void
-    if m.playbackSettingsPanel <> invalid or m.qualitySelector <> invalid
+function OnPreferredQualityChange(_event = invalid as dynamic) as void
+    if m.buttonRow = invalid
         return
     end if
-
-    panel = CreateObject("roSGNode", "PlaybackSettingsPanel")
-    if panel = invalid
-        LogError("Failed to create PlaybackSettingsPanel")
-        m.buttonRow.nudge = true
-        ArmAutoHide()
-        return
-    end if
-
-    panel.qualityLabel = PlayerCoordinatorLogic.QualityLabel(CurrentQualityPreference())
-    panel.speedDefaultValue = CurrentPlaybackSpeedPreference()
-    panel.speedValue = CurrentPlaybackSpeedValue()
-    panel.speedEnabled = PlaybackSpeedAvailable()
-    panel.ObserveFieldScoped("requestQuality", FuncName(OnPlaybackSettingsQuality))
-    panel.ObserveFieldScoped("speedChanged", FuncName(OnPlaybackSettingsSpeed))
-    panel.ObserveFieldScoped("closed", FuncName(OnPlaybackSettingsClosed))
-    m.top.AppendChild(panel)
-    m.playbackSettingsPanel = panel
-
-    HideChromeNow()
-    NodeSetFocus(panel, true)
-end function
-
-function OnPlaybackSettingsQuality(event as object) as void
-    panel = event.GetRoSGNode()
-    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
-        return
-    end if
-    NodeSetFocus(panel, false)
-    OpenQualitySelector()
-end function
-
-function OnPlaybackSettingsSpeed(event as object) as void
-    panel = event.GetRoSGNode()
-    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
-        return
-    end if
-    SetCurrentPlaybackSpeed(ValidString(event.GetData()))
-end function
-
-function OnPlaybackSettingsClosed(event as object) as void
-    panel = event.GetRoSGNode()
-    if m.playbackSettingsPanel = invalid or panel = invalid or not panel.IsSameNode(m.playbackSettingsPanel)
-        return
-    end if
-    RemovePlaybackSettings()
-    if m.onCloseCalled = true
-        return
-    end if
-    NodeSetFocus(m.top, true)
-    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
-    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
-    ShowChrome(true)
-end function
-
-function RemovePlaybackSettings() as void
-    panel = m.playbackSettingsPanel
-    if panel = invalid
-        return
-    end if
-    panel.UnobserveFieldScoped("requestQuality")
-    panel.UnobserveFieldScoped("speedChanged")
-    panel.UnobserveFieldScoped("closed")
-    parent = panel.GetParent()
-    if parent <> invalid
-        parent.RemoveChild(panel)
-    end if
-    m.playbackSettingsPanel = invalid
+    value = CurrentQualityPreference()
+    m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(value)
+    m.buttonRow.qualityDescription = PlayerCoordinatorLogic.QualityDescription(value)
 end function
 
 function OpenQualitySelector() as void
-    if m.qualitySelector <> invalid
+    if m.qualitySelector <> invalid or m.speedSelector <> invalid
         return
     end if
 
     selector = CreateObject("roSGNode", "QualitySelector")
     if selector = invalid
         LogError("Failed to create QualitySelector")
-        if m.playbackSettingsPanel <> invalid
-            NodeSetFocus(m.playbackSettingsPanel, true)
-        end if
+        m.buttonRow.nudge = true
+        ArmAutoHide()
         return
     end if
 
     selector.embedded = true
+    selector.id = "playerQualitySelector"
     m.top.appendChild(selector)
     selector@.BindNode()
     selector.value = CurrentQualityPreference()
@@ -768,6 +710,7 @@ function OpenQualitySelector() as void
     selector.ObserveFieldScoped("closed", FuncName(OnQualitySelectorClosed))
     m.qualitySelector = selector
 
+    HideChromeNow()
     NodeSetFocus(selector, true)
 end function
 
@@ -784,10 +727,7 @@ function OnQualitySelectorSave(event as object) as void
     if m.top.preferences <> invalid
         m.top.preferences["playback.preferred_quality"] = value
     end if
-    m.buttonRow.qualityLabel = PlayerCoordinatorLogic.QualityLabel(value)
-    if m.playbackSettingsPanel <> invalid
-        m.playbackSettingsPanel.qualityLabel = m.buttonRow.qualityLabel
-    end if
+    OnPreferredQualityChange()
 end function
 
 function OnQualitySelectorClosed(event as object) as void
@@ -801,14 +741,10 @@ function OnQualitySelectorClosed(event as object) as void
         return
     end if
 
-    if m.playbackSettingsPanel <> invalid
-        NodeSetFocus(m.playbackSettingsPanel, true)
-    else
-        NodeSetFocus(m.top, true)
-        m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
-        m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlaybackSettings
-        ShowChrome(true)
-    end if
+    NodeSetFocus(m.top, true)
+    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
+    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.Quality
+    ShowChrome(true)
 end function
 
 function RemoveQualitySelector() as void
@@ -824,6 +760,88 @@ function RemoveQualitySelector() as void
         parent.RemoveChild(selector)
     end if
     m.qualitySelector = invalid
+end function
+
+function PlaybackSpeedOptions() as object
+    options = []
+    for each value in PlayerCoordinatorLogic.PlaybackSpeedValues()
+        options.Push({
+            displayText: PlayerCoordinatorLogic.PlaybackSpeedLabel(value)
+            value: value
+        })
+    end for
+    return options
+end function
+
+function OpenPlaybackSpeedSelector() as void
+    if m.speedSelector <> invalid or m.qualitySelector <> invalid
+        return
+    end if
+    if not PlaybackSpeedAvailable()
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    selector = CreateObject("roSGNode", "PlaybackSpeedSelector")
+    if selector = invalid
+        LogError("Failed to create PlaybackSpeedSelector")
+        m.buttonRow.nudge = true
+        ArmAutoHide()
+        return
+    end if
+
+    selector.embedded = true
+    selector.id = "playerSpeedSelector"
+    selector.title = Tr(Locale.VideoPlayer.SpeedForThisVideo)
+    m.top.AppendChild(selector)
+    selector@.BindNode()
+    selector.options = PlaybackSpeedOptions()
+    selector.value = CurrentPlaybackSpeedValue()
+    selector.ObserveFieldScoped("save", FuncName(OnPlaybackSpeedSelectorSave))
+    selector.ObserveFieldScoped("closed", FuncName(OnPlaybackSpeedSelectorClosed))
+    m.speedSelector = selector
+
+    HideChromeNow()
+    NodeSetFocus(selector, true)
+end function
+
+function OnPlaybackSpeedSelectorSave(event as object) as void
+    selector = event.GetRoSGNode()
+    if m.speedSelector = invalid or selector = invalid or not selector.IsSameNode(m.speedSelector)
+        return
+    end if
+    SetCurrentPlaybackSpeed(ValidString(selector.value))
+end function
+
+function OnPlaybackSpeedSelectorClosed(event as object) as void
+    selector = event.GetRoSGNode()
+    if m.speedSelector = invalid or selector = invalid or not selector.IsSameNode(m.speedSelector)
+        return
+    end if
+
+    RemovePlaybackSpeedSelector()
+    if m.onCloseCalled = true
+        return
+    end if
+    NodeSetFocus(m.top, true)
+    m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Buttons
+    m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed
+    ShowChrome(true)
+end function
+
+function RemovePlaybackSpeedSelector() as void
+    selector = m.speedSelector
+    if selector = invalid
+        return
+    end if
+    selector.UnobserveFieldScoped("save")
+    selector.UnobserveFieldScoped("closed")
+    parent = selector.GetParent()
+    if parent <> invalid
+        parent.RemoveChild(selector)
+    end if
+    m.speedSelector = invalid
 end function
 
 function CurrentPlaybackSpeedPreference() as string
@@ -907,11 +925,7 @@ function OnPlaybackSpeedChange(_event = invalid as dynamic) as void
     value = CurrentPlaybackSpeedValue()
     if m.buttonRow <> invalid
         m.buttonRow.speedLabel = PlayerCoordinatorLogic.PlaybackSpeedLabel(value)
-    end if
-    if m.playbackSettingsPanel <> invalid
-        m.playbackSettingsPanel.speedValue = value
-        m.playbackSettingsPanel.speedDefaultValue = CurrentPlaybackSpeedPreference()
-        m.playbackSettingsPanel.speedEnabled = PlaybackSpeedAvailable()
+        m.buttonRow.speedEnabled = PlaybackSpeedAvailable()
     end if
 end function
 
@@ -2109,11 +2123,12 @@ function OnClose() as void
         m.bookmarksService.unobserveFieldScoped("contentChange")
     end if
     if m.top.preferences <> invalid
+        m.top.preferences.unobserveFieldScoped("playback.preferred_quality")
         m.top.preferences.unobserveFieldScoped("playback.preferred_speed")
         m.top.preferences.unobserveFieldScoped("playback.show_chapter_markers")
     end if
     RemoveQualitySelector()
-    RemovePlaybackSettings()
+    RemovePlaybackSpeedSelector()
     content = m.top.content
     if content <> invalid
         content.unobserveField("title")

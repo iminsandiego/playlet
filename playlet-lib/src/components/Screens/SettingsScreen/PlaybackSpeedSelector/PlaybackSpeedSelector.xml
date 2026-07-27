@@ -2,6 +2,7 @@
     <interface>
         <field id="value" type="string" onChange="OnValueChange" />
         <field id="options" type="array" onChange="OnOptionsChange" />
+        <field id="title" type="string" alias="title.text" />
         <field id="save" type="boolean" alwaysNotify="true" />
         <field id="embedded" type="boolean" value="false" />
         <field id="closed" type="boolean" alwaysNotify="true" />
@@ -23,8 +24,7 @@
                 id="title"
                 width="520"
                 translation="[50,32]"
-                horizAlign="center"
-                text="Default playback speed">
+                horizAlign="center">
                 <Font role="font" uri="font:SystemFontFile" size="28" />
             </Label>
             <RadioButtonList

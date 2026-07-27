@@ -18,11 +18,12 @@ export const Button = {
     previous: 0,
     playPause: 1,
     next: 2,
-    playbackSettings: 3,
-    captions: 4,
-    stats: 5,
-    bookmark: 6,
-    minimize: 7,
+    quality: 3,
+    speed: 4,
+    captions: 5,
+    stats: 6,
+    bookmark: 7,
+    minimize: 8,
 } as const;
 
 const j = (v: unknown) => JSON.stringify(v);

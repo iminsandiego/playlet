@@ -169,15 +169,10 @@ function TestSaveQuality(value as string) as void
     m.qualitySelector.save = true
 end function
 
-function TestOpenQualityFromPanel() as void
-    if m.playbackSettingsPanel <> invalid
-        m.playbackSettingsPanel.requestQuality = true
-    end if
-end function
-
 function TestSetPlaybackSpeed(value as string) as void
-    if m.playbackSettingsPanel <> invalid
-        m.playbackSettingsPanel.speedChanged = value
+    if m.speedSelector <> invalid
+        m.speedSelector.value = value
+        m.speedSelector.save = true
     end if
 end function
 
@@ -185,9 +180,9 @@ function TestResetPlaybackSpeedForNewContent() as void
     ResetCurrentPlaybackSpeed()
 end function
 
-function TestClosePlaybackSettings() as void
-    if m.playbackSettingsPanel <> invalid
-        m.playbackSettingsPanel.closed = true
+function TestClosePlaybackSpeed() as void
+    if m.speedSelector <> invalid
+        m.speedSelector.closed = true
     end if
 end function
 
@@ -303,14 +298,16 @@ function TestSnapshot() as object
         focusedButton: m.focusedButton
         statsEnabled: m.statsEnabled
         statsOverlayPresent: m.statsForNerds <> invalid
-        playbackSettingsPresent: m.playbackSettingsPanel <> invalid
         qualitySelectorPresent: m.qualitySelector <> invalid
+        speedSelectorPresent: m.speedSelector <> invalid
         qualityPreference: m.top.preferences["playback.preferred_quality"]
         qualityLabel: m.buttonRow.qualityLabel
+        qualityDescription: m.buttonRow.qualityDescription
         speedPreference: m.top.preferences["playback.preferred_speed"]
         speedOverride: m.currentPlaybackSpeedOverride
         playbackSpeed: m.top.playbackSpeed
         speedLabel: m.buttonRow.speedLabel
+        speedDisabled: m.buttonRow.findNode("SpeedButton").disabled
         focusedLabel: m.buttonRow.focusedLabel
         previousDisabled: m.buttonRow.findNode("PreviousButton").disabled
         nextDisabled: m.buttonRow.findNode("NextButton").disabled

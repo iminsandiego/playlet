@@ -421,6 +421,7 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Right, true)
             m.top.callFunc("TestKey", RemoteKeys.Right, true)
             m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
             m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
             m.top.callFunc("TestKey", RemoteKeys.Down, true)
             m.top.callFunc("TestKey", RemoteKeys.Up, true)
@@ -457,10 +458,10 @@ namespace Tests
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier (default)
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' play/pause -> playback settings
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' play/pause -> quality
             m.top.callFunc("TestKey", RemoteKeys.Down, true) ' buttons -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons
-            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' playback settings -> play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' quality -> play/pause
             m.assertEqual(m.Snap().nudgeCount, 0, "every press moved focus; none may pulse")
         end function
 
@@ -471,7 +472,8 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier, play/pause
             m.top.callFunc("TestKey", RemoteKeys.Left, true) ' Previous is disabled, so Play is the first enabled control
             m.assertEqual(m.Snap().nudgeCount, 1)
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skips disabled Next -> Playback settings
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skips disabled Next -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Speed
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Captions
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' skips disabled Bookmark -> Minimize
@@ -539,7 +541,8 @@ namespace Tests
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier (default)
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier
-            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Speed
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Captions
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight Stats
             m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
@@ -554,7 +557,8 @@ namespace Tests
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons, play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next is skipped -> Playback settings
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next is skipped -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Speed
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Captions
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
             before = m.Snap()
@@ -576,53 +580,57 @@ namespace Tests
             m.assertFalse(m.top.preferences["playback.stats_for_nerds"])
         end function
 
-        @it("Playback settings nests quality selection and restores the owning button focus")
+        @it("Quality opens directly from its value button and restores that button focus")
         function _()
             initial = m.Snap()
             m.assertEqual(initial.qualityPreference, "auto")
             m.assertEqual(initial.qualityLabel, "Auto")
-            m.assertFalse(initial.playbackSettingsPresent)
             m.assertFalse(initial.qualitySelectorPresent)
 
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Playback settings
-            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.PlaybackSettings)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Quality
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality)
 
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
             open = m.Snap()
-            m.assertTrue(open.playbackSettingsPresent)
-            m.assertFalse(open.qualitySelectorPresent)
+            m.assertTrue(open.qualitySelectorPresent)
             m.assertFalse(open.chromeShown, "the modal owns the screen while open")
 
-            m.top.callFunc("TestOpenQualityFromPanel")
-            m.assertTrue(m.Snap().qualitySelectorPresent)
             m.top.callFunc("TestSaveQuality", "1080p")
             saved = m.Snap()
             m.assertEqual(saved.qualityPreference, "1080p")
-            m.assertEqual(saved.qualityLabel, "1080p")
+            m.assertEqual(saved.qualityLabel, "1080")
+            m.assertEqual(saved.qualityDescription, "1080p")
 
             m.top.callFunc("TestCloseQuality")
             selectorClosed = m.Snap()
             m.assertFalse(selectorClosed.qualitySelectorPresent)
-            m.assertTrue(selectorClosed.playbackSettingsPresent, "quality returns to the parent settings panel")
-            m.assertFalse(selectorClosed.chromeShown)
-
-            m.top.callFunc("TestClosePlaybackSettings")
-            closed = m.Snap()
-            m.assertFalse(closed.playbackSettingsPresent)
-            m.assertTrue(closed.chromeShown)
-            m.assertEqual(closed.focusTarget, PlayerCoordinatorLogic.FocusTarget.Buttons)
-            m.assertEqual(closed.focusedButton, PlayerCoordinatorLogic.PlayerButton.PlaybackSettings)
+            m.assertTrue(selectorClosed.chromeShown)
+            m.assertEqual(selectorClosed.focusTarget, PlayerCoordinatorLogic.FocusTarget.Buttons)
+            m.assertEqual(selectorClosed.focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality)
         end function
 
-        @it("Playback settings applies speed only to the current VOD, then the next content restores its default")
+        @it("Quality reflects a preference changed outside the player")
+        function _()
+            m.assertEqual(m.Snap().qualityLabel, "Auto")
+            m.top.preferences["playback.preferred_quality"] = "1440p,1080p"
+            changed = m.Snap()
+            m.assertEqual(changed.qualityPreference, "1440p,1080p")
+            m.assertEqual(changed.qualityLabel, "1440")
+            m.assertEqual(changed.qualityDescription, "1440p")
+        end function
+
+        @it("Speed opens directly from its value button and applies only to the current VOD")
         function _()
             m.top.callFunc("TestKey", RemoteKeys.Up, true)
             m.top.callFunc("TestKey", RemoteKeys.Up, true)
-            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Speed
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
-            m.assertTrue(m.Snap().playbackSettingsPresent)
+            opened = m.Snap()
+            m.assertTrue(opened.speedSelectorPresent)
+            m.assertFalse(opened.chromeShown)
 
             m.top.callFunc("TestSetPlaybackSpeed", "1.5")
             changed = m.Snap()
@@ -652,8 +660,23 @@ namespace Tests
             m.assertEqual(normalized.speedOverride, "2.0")
             m.assertEqual(normalized.playbackSpeed, 2.0)
             m.assertEqual(normalized.speedLabel, "2x")
-            m.top.callFunc("TestClosePlaybackSettings")
-            m.assertFalse(m.Snap().playbackSettingsPresent)
+            m.top.callFunc("TestClosePlaybackSpeed")
+            closed = m.Snap()
+            m.assertFalse(closed.speedSelectorPresent)
+            m.assertTrue(closed.chromeShown)
+            m.assertEqual(closed.focusTarget, PlayerCoordinatorLogic.FocusTarget.Buttons)
+            m.assertEqual(closed.focusedButton, PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed)
+        end function
+
+        @it("Live video skips the disabled speed control")
+        function _()
+            m.top.callFunc("TestSetLive", 43200000)
+            m.assertTrue(m.Snap().speedDisabled)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Speed is skipped -> Captions
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Captions)
         end function
 
         @it("CC mirrors every non-Off global mode and toggles only Off/On without touching PiP suppression")
@@ -666,7 +689,8 @@ namespace Tests
 
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Playback settings
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' disabled Next -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Speed
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> CC
             m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Captions)
 
@@ -704,7 +728,8 @@ namespace Tests
 
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' -> play/pause
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Playback settings
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Quality
+            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Speed
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> CC
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Bookmark
@@ -795,10 +820,11 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Up, true)
             m.assertEqual(m.Snap().focusedLabel, Tr(Locale.VideoPlayer.Pause))
             m.top.callFunc("TestKey", RemoteKeys.Right, true)
-            settings = m.Snap()
-            m.assertTrue(settings.focusedLabel.InStr(Tr(Locale.VideoPlayer.PlaybackSettings)) >= 0)
-            m.assertTrue(settings.focusedLabel.InStr("Auto") >= 0)
-            m.assertTrue(settings.focusedLabel.InStr("1x") >= 0)
+            quality = m.Snap()
+            m.assertEqual(quality.focusedLabel, Tr(Locale.Settings.DefaultQuality) + ": Auto")
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            speed = m.Snap()
+            m.assertEqual(speed.focusedLabel, Tr(Locale.VideoPlayer.SpeedForThisVideo) + ": 1x")
         end function
 
         @it("Go Live is advertised on the focused live bar and returns directly to the edge")
@@ -844,7 +870,7 @@ namespace Tests
                 classified[name] = "controller"
             end for
             ' cached child nodes / timers / animations / reusable helpers (structure, not state).
-            for each name in ["chrome", "titleLabel", "secondaryTitleLabel", "clock", "bifDisplay", "trickPlayBar", "spinner", "largePause", "buttonRow", "fullScreenHint", "autoHide", "transportTimer", "liveBadgeHold", "liveEdgeClock", "fullScreenHintTimer", "chromeFadeIn", "chromeFadeOut", "minimize", "nowDateTime", "statsForNerds", "playbackSettingsPanel", "qualitySelector"]
+            for each name in ["chrome", "titleLabel", "secondaryTitleLabel", "clock", "bifDisplay", "trickPlayBar", "spinner", "largePause", "buttonRow", "fullScreenHint", "autoHide", "transportTimer", "liveBadgeHold", "liveEdgeClock", "fullScreenHintTimer", "chromeFadeIn", "chromeFadeOut", "minimize", "nowDateTime", "statsForNerds", "qualitySelector", "speedSelector"]
                 classified[name] = "node"
             end for
             ' in-flight job handles.

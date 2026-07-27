@@ -1,3 +1,4 @@
+import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/RemoteKeys.bs"
 
 namespace Tests
@@ -23,7 +24,7 @@ namespace Tests
 
         @it("shows one compact list and saves the selected speed")
         function _()
-            m.assertEqual(m.top.findNode("title").text, "Default playback speed")
+            m.assertEqual(m.top.findNode("title").text, Tr(Locale.Settings.DefaultPlaybackSpeed))
             speedList = m.top.findNode("speedList")
             m.assertEqual(speedList.content.getChildCount(), 3)
             m.assertEqual(speedList.checkedItem, 1)
@@ -39,6 +40,12 @@ namespace Tests
             m.assertFalse(m.top.focus)
         end function
 
+        @it("accepts a contextual title when embedded in the player")
+        function _()
+            m.top.title = "Speed for this video"
+            m.assertEqual(m.top.findNode("title").text, "Speed for this video")
+        end function
+
         @it("back closes without changing or saving the preference")
         function _()
             m.assertTrue(m.top.callFunc("TestKey", RemoteKeys.Back, true))
@@ -47,6 +54,15 @@ namespace Tests
             m.assertFalse(m.top.save)
             m.assertEqual(m.top.value, "1.0")
             m.assertTrue(m.top.closed)
+        end function
+
+        @it("passes playback keys through to the hosting player")
+        function _()
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.Play, true))
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.Pause, true))
+            m.assertFalse(m.top.callFunc("TestKey", RemoteKeys.PlayOnly, true))
+            m.assertFalse(m.top.save)
+            m.assertFalse(m.top.closed)
         end function
 
     end class
