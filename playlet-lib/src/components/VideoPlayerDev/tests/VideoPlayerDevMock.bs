@@ -298,6 +298,7 @@ function TestSnapshot() as object
         focusedButton: m.focusedButton
         statsEnabled: m.statsEnabled
         statsOverlayPresent: m.statsForNerds <> invalid
+        statsOverlayVisible: m.statsForNerds <> invalid and m.statsForNerds.visible
         qualitySelectorPresent: m.qualitySelector <> invalid
         speedSelectorPresent: m.speedSelector <> invalid
         qualityPreference: m.top.preferences["playback.preferred_quality"]
