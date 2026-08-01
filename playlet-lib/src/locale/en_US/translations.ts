@@ -1093,28 +1093,28 @@
         <translation>Unavailable for live video</translation>
     </message>
     <message>
+        <source>Video ID:</source>
+        <translation>Video ID:</translation>
+    </message>
+    <message>
         <source>State:</source>
         <translation>State:</translation>
     </message>
     <message>
-        <source>Position:</source>
-        <translation>Position:</translation>
+        <source>Playback:</source>
+        <translation>Playback:</translation>
     </message>
     <message>
-        <source>Duration:</source>
-        <translation>Duration:</translation>
+        <source>Viewport:</source>
+        <translation>Viewport:</translation>
     </message>
     <message>
         <source>Resolution:</source>
         <translation>Resolution:</translation>
     </message>
     <message>
-        <source>Video format:</source>
-        <translation>Video format:</translation>
-    </message>
-    <message>
-        <source>Audio format:</source>
-        <translation>Audio format:</translation>
+        <source>Codecs:</source>
+        <translation>Codecs:</translation>
     </message>
     <message>
         <source>Bitrate:</source>

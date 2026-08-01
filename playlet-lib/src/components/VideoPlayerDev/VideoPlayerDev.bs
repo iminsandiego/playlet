@@ -140,6 +140,10 @@ end function
 ' Called by AutoBind once the bound interface fields (container, jobQueue, services, ...) resolve.
 function OnNodeReady()
 
+    ' Create diagnostics before playback begins so transient decoder fields can be retained. The component
+    ' stays hidden until enabled, but keeps the focused branch's low-frequency stream cache warm.
+    EnsureStatsForNerds()
+
     ' Created here, not Init, because it needs AutoBind-resolved deps (jobQueue / preferences / notifications).
     m.sponsorblock = new SponsorBlockController.Controller({
         jobQueue: m.jobQueue
@@ -1037,10 +1041,9 @@ end function
 
 function SetStatsForNerdsEnabled(enabled as boolean) as void
     m.statsEnabled = enabled
-    if enabled
-        EnsureStatsForNerds()
-    else
-        RemoveStatsForNerds()
+    EnsureStatsForNerds()
+    if m.statsForNerds <> invalid
+        m.statsForNerds.visible = enabled
     end if
     if m.buttonRow <> invalid
         m.buttonRow.statsEnabled = enabled
@@ -1049,6 +1052,7 @@ end function
 
 function EnsureStatsForNerds() as void
     if m.statsForNerds <> invalid
+        m.statsForNerds.visible = m.statsEnabled
         return
     end if
 
@@ -1058,6 +1062,7 @@ function EnsureStatsForNerds() as void
         m.statsEnabled = false
         return
     end if
+    stats.visible = m.statsEnabled
     stats.video = m.top
     m.top.appendChild(stats)
     m.statsForNerds = stats
