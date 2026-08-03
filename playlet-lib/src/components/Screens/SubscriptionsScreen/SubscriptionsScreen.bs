@@ -158,6 +158,12 @@ function LoadIfNeeded() as void
         profile: profile
         invidious: m.invidious
     }
+    #if TEST_MODE
+        if m.top.hasField("testFixturePages")
+            input.fixturePages = m.top.testFixturePages
+            input.fixtureProbe = m.top.testFixtureProbe
+        end if
+    #end if
     m.loadingProfileId = profileId
     m.loadCallback = JobSystem.CreateCallback(OnSubscribedChannelsJobDone)
     JobSystem.QueueJob(m.jobQueue, Jobs.SubscribedChannelsJob, input, m.loadCallback)
@@ -230,6 +236,11 @@ function ShowLoading() as void
     m.busySpinner.poster.rotation = 0
     m.busySpinner.visible = true
     m.busySpinner.control = "start"
+    #if TEST_MODE
+        if m.top.hasField("testLoadState")
+            m.top.testLoadState = "loading"
+        end if
+    #end if
 end function
 
 function ShowMessage(message as string, detail as string, actionText as string, action as string) as void
@@ -241,6 +252,11 @@ function ShowMessage(message as string, detail as string, actionText as string, 
     m.actionButton.text = actionText
     m.actionButton.visible = not StringUtils.IsNullOrEmpty(actionText)
     m.messageState.visible = true
+    #if TEST_MODE
+        if m.top.hasField("testLoadState")
+            m.top.testLoadState = "message"
+        end if
+    #end if
 
     if m.top.isInFocusChain()
         FocusContent()
@@ -253,6 +269,11 @@ function ShowChannels(content as object) as void
     m.channelsGrid.content = content
     m.channelsGrid.visible = true
     RestoreFocusedChannel(content)
+    #if TEST_MODE
+        if m.top.hasField("testLoadState")
+            m.top.testLoadState = "channels"
+        end if
+    #end if
 
     if m.top.isInFocusChain()
         FocusContent()
@@ -328,6 +349,12 @@ function OpenChannel(channel as object) as void
         LogWarn("Cannot open a subscribed channel without an authorId")
         return
     end if
+    #if TEST_MODE
+        if m.top.hasField("testOpenedChannelId")
+            m.top.testOpenedChannelId = channel.authorId
+            return
+        end if
+    #end if
     ChannelUtils.Open(channel, m.appController)
 end function
 

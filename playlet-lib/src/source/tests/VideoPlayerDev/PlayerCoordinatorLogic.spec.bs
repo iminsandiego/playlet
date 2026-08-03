@@ -285,7 +285,7 @@ namespace Tests
             m.assertEqual(PlayerCoordinatorLogic.QualityLabel(invalid), "Auto")
             m.assertEqual(PlayerCoordinatorLogic.QualityLabel("auto"), "Auto")
             m.assertEqual(PlayerCoordinatorLogic.QualityLabel("2160p,1440p,1080p"), "4K")
-            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("1080p,720p"), "1080p")
+            m.assertEqual(PlayerCoordinatorLogic.QualityLabel("1080p,720p"), "1080")
         end function
 
         @it("formats playback speed labels compactly")

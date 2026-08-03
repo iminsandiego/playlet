@@ -1,0 +1,109 @@
+import "pkg:/source/utils/Locale.bs"
+
+namespace Tests
+
+    @SGNode("SubscriptionsScreenTestHarness")
+    @suite
+    class SubscriptionsScreenE2ETests extends Rooibos.BaseTestSuite
+
+        protected override function afterEach()
+            m.top.callFunc("TestTeardown")
+        end function
+
+        @describe("fixture-backed subscribed channels destination")
+
+        @async(8000)
+        @it("loads authenticated continuation pages, opens a channel, and reuses the cache")
+        function _() as object
+            m.top.callFunc("TestSetup", m.ChannelFixturePages(), true)
+            context = { test: m, top: m.top }
+            return rooibos.promises.chain(m.top.callFunc("TestWaitForState", "channels"), context).then(function(snapshot as object, context as object) as object
+                context.test.assertEqual(snapshot.authorIds, ["UC_TV_ALPHA", "UC_TV_BETA"])
+                context.test.assertEqual(snapshot.probeCalls, 3)
+                context.test.assertEqual(snapshot.accessToken, "fixture-access-token")
+                context.test.assertEqual(snapshot.onBehalfOfUser, "fixture-brand-account")
+
+                context.test.assertTrue(context.top.callFunc("TestSelect", 1))
+                snapshot = context.top.callFunc("TestSnapshot")
+                context.test.assertEqual(snapshot.openedChannelId, "UC_TV_BETA")
+
+                context.top.callFunc("TestHideAndShow")
+                return context.top.callFunc("TestWaitForState", "channels")
+            end function).then(function(snapshot as object, context as object) as dynamic
+                context.test.assertEqual(snapshot.probeCalls, 3, "re-entry inside the TTL should reuse cached channels")
+                context.test.assertTrue(context.top.callFunc("TestPressBack"))
+                finalSnapshot = context.top.callFunc("TestSnapshot")
+                context.test.assertTrue(finalSnapshot.navBarFocused)
+                return invalid
+            end function).toPromise()
+        end function
+
+        @async(8000)
+        @it("evicts the signed-in profile cache after a subscription mutation")
+        function _() as object
+            m.top.callFunc("TestSetup", m.ChannelFixturePages(), true)
+            context = { test: m, top: m.top }
+            return rooibos.promises.chain(m.top.callFunc("TestWaitForState", "channels"), context).then(function(snapshot as object, context as object) as object
+                context.test.assertEqual(snapshot.probeCalls, 3)
+                context.top.callFunc("TestPublishSubscriptionsChange")
+                return context.top.callFunc("TestWaitForState", "loading")
+            end function).then(function(_snapshot as object, context as object) as object
+                return context.top.callFunc("TestWaitForState", "channels")
+            end function).then(function(snapshot as object, context as object) as dynamic
+                context.test.assertEqual(snapshot.probeCalls, 6)
+                context.test.assertEqual(snapshot.authorIds, ["UC_TV_ALPHA", "UC_TV_BETA"])
+                return invalid
+            end function).toPromise()
+        end function
+
+        @it("shows the profile action without issuing a request when signed out")
+        function _()
+            m.top.callFunc("TestSetup", m.ChannelFixturePages(), false)
+            snapshot = m.top.callFunc("TestSnapshot")
+
+            m.assertEqual(snapshot.message, Tr(Locale.Subscriptions.SignInRequired))
+            m.assertEqual(snapshot.action, Tr(Locale.Buttons.GoToProfile))
+            m.assertEqual(snapshot.probeCalls, 0)
+        end function
+
+        @async(8000)
+        @it("renders the empty state from an authenticated response")
+        function _() as object
+            m.top.callFunc("TestSetup", [], true)
+            context = { test: m, top: m.top }
+            return rooibos.promises.chain(m.top.callFunc("TestWaitForState", "message"), context).then(function(snapshot as object, context as object) as dynamic
+                context.test.assertEqual(snapshot.message, Tr(Locale.Subscriptions.NoSubscriptions))
+                context.test.assertEqual(snapshot.probeCalls, 1)
+                return invalid
+            end function).toPromise()
+        end function
+
+        @async(8000)
+        @it("surfaces a request failure and retries through the real action handler")
+        function _() as object
+            m.top.callFunc("TestSetup", ["error:fixture failure"], true)
+            context = { test: m, top: m.top, fixturePages: m.ChannelFixturePages() }
+            return rooibos.promises.chain(m.top.callFunc("TestWaitForState", "message"), context).then(function(snapshot as object, context as object) as object
+                context.test.assertEqual(snapshot.message, Tr(Locale.Subscriptions.LoadError))
+                context.test.assertTrue(Instr(1, snapshot.detail, "fixture failure") > 0)
+                context.test.assertEqual(snapshot.action, Tr(Locale.Buttons.Retry))
+
+                context.top.callFunc("TestSetFixturePages", context.fixturePages)
+                context.top.callFunc("TestRetry")
+                return context.top.callFunc("TestWaitForState", "channels")
+            end function).then(function(snapshot as object, context as object) as dynamic
+                context.test.assertEqual(snapshot.authorIds, ["UC_TV_ALPHA", "UC_TV_BETA"])
+                return invalid
+            end function).toPromise()
+        end function
+
+        private function ChannelFixturePages() as object
+            return [
+                "pkg:/source/components/tests/fixtures/fechannels-tv.json"
+                "pkg:/source/components/tests/fixtures/fechannels-tv-continuation.json"
+            ]
+        end function
+
+    end class
+
+end namespace

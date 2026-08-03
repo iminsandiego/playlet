@@ -1,7 +1,9 @@
 import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.bs"
+import "pkg:/components/Services/Innertube/Parser.bs"
 import "pkg:/components/Services/Invidious/InvidiousService.bs"
 import "pkg:/components/Services/Subscriptions/SubscribedChannels.bs"
 import "pkg:/source/utils/CancellationUtils.bs"
+import "pkg:/source/utils/StringUtils.bs"
 import "pkg:/source/utils/Types.bs"
 
 @job("SubscribedChannelsJob")
@@ -31,7 +33,13 @@ function ExecuteJob() as void
     end if
 
     if profile.type = "youtube"
-        result = SubscribedChannels.FetchYouTube(auth, cancellation)
+        pageFetcher = invalid
+        #if TEST_MODE
+            if input.DoesExist("fixturePages")
+                pageFetcher = CreateSubscribedChannelsFixtureFetcher(input.fixturePages, input.fixtureProbe)
+            end if
+        #end if
+        result = SubscribedChannels.FetchYouTube(auth, cancellation, pageFetcher)
         if result.cancelled = true
             JobCancel()
             return
@@ -68,3 +76,41 @@ function ExecuteJob() as void
     ' a wrapper instead of assigning a node directly to the field.
     JobSuccessData({ content: SubscribedChannels.ToContentNode(channelItemsById) })
 end function
+
+#if TEST_MODE
+    function CreateSubscribedChannelsFixtureFetcher(fixturePages as object, fixtureProbe as dynamic) as object
+        return {
+            fixturePages: fixturePages
+            fixtureProbe: fixtureProbe
+            nextPageIndex: 0
+            Fetch: function(options as object) as object
+                if m.fixtureProbe <> invalid
+                    m.fixtureProbe.calls = m.fixtureProbe.calls + 1
+                    m.fixtureProbe.lastAccessToken = ValidString(options.accessToken)
+                    m.fixtureProbe.lastOnBehalfOfUser = ValidString(options.onBehalfOfUser)
+                end if
+
+                if not IsArray(m.fixturePages) or m.nextPageIndex >= m.fixturePages.Count()
+                    return { feeds: [] }
+                end if
+
+                fixturePage = ValidString(m.fixturePages[m.nextPageIndex])
+                m.nextPageIndex += 1
+                if Left(fixturePage, 6) = "error:"
+                    return { error: Mid(fixturePage, 7) }
+                end if
+
+                responseData = StringUtils.ParseJsonSafe(ReadAsciiFile(fixturePage))
+                if responseData = invalid
+                    return { error: "Invalid subscribed channels fixture: " + fixturePage }
+                end if
+                return {
+                    feeds: Innertube.ParseResponseDataForFeeds(responseData, {
+                        response: invalid
+                        browseId: "FEchannels"
+                    })
+                }
+            end function
+        }
+    end function
+#end if

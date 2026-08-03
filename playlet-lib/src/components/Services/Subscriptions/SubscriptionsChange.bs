@@ -3,13 +3,13 @@ import "pkg:/source/utils/Types.bs"
 namespace SubscriptionsChange
 
     function Create(profile as dynamic, channelId as string, isSubscribed as boolean) as object
-        profileId = ""
+        changedProfileId = ""
         if profile <> invalid
-            profileId = ValidString(profile.id)
+            changedProfileId = ValidString(profile.id)
         end if
 
         return {
-            profileId: profileId
+            profileId: changedProfileId
             channelId: channelId
             isSubscribed: isSubscribed
         }
