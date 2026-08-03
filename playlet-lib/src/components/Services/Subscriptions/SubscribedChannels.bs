@@ -1,0 +1,196 @@
+import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.types.bs"
+import "pkg:/components/Services/Innertube/InnertubeService.bs"
+import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
+import "pkg:/source/utils/CancellationUtils.bs"
+import "pkg:/source/utils/StringUtils.bs"
+import "pkg:/source/utils/Types.bs"
+
+namespace SubscribedChannels
+
+    ' This guards against a malformed endpoint cycling through unique continuation
+    ' tokens forever. YouTube recommends keeping subscriptions below 5,000; 100
+    ' browse pages leaves ample room for a normal account while bounding the job.
+    const MAX_YOUTUBE_CHANNEL_PAGES = 100
+
+    function NewLookup() as object
+        lookup = CreateObject("roAssociativeArray")
+        lookup.SetModeCaseSensitive()
+        return lookup
+    end function
+
+    function CollectYouTubeFeedItems(feeds as dynamic, channelItemsById as object) as void
+        if not IsArray(feeds)
+            return
+        end if
+
+        for each feed in feeds
+            if not IsAssociativeArray(feed) or not IsArray(feed.items)
+                continue for
+            end if
+            for each item in feed.items
+                if not IsAssociativeArray(item) or ValidString(item.type) <> "channel"
+                    continue for
+                end if
+                AddChannelItem(item, channelItemsById)
+            end for
+        end for
+    end function
+
+    function CollectInvidiousItems(items as dynamic, channelItemsById as object) as void
+        if not IsArray(items)
+            return
+        end if
+
+        for each item in items
+            if IsAssociativeArray(item)
+                AddChannelItem(item, channelItemsById)
+            end if
+        end for
+    end function
+
+    function AddChannelItem(item as object, channelItemsById as object) as void
+        authorId = ValidString(item.authorId)
+        if StringUtils.IsNullOrEmpty(authorId) or channelItemsById.DoesExist(authorId)
+            return
+        end if
+        channelItemsById[authorId] = item
+    end function
+
+    function GetContinuations(feeds as dynamic) as object
+        continuations = []
+        seen = NewLookup()
+        if not IsArray(feeds)
+            return continuations
+        end if
+
+        for each feed in feeds
+            if not IsAssociativeArray(feed)
+                continue for
+            end if
+            continuation = ValidString(feed.continuation)
+            if StringUtils.IsNullOrEmpty(continuation) or seen.DoesExist(continuation)
+                continue for
+            end if
+            seen[continuation] = true
+            continuations.Push(continuation)
+        end for
+        return continuations
+    end function
+
+    function SortItemsByAuthor(channelItemsById as object) as object
+        sortable = []
+        for each authorId in channelItemsById
+            item = channelItemsById[authorId]
+            sortable.Push({
+                sortKey: LCase(ValidString(item.author)) + Chr(1) + authorId
+                item: item
+            })
+        end for
+        sortable.SortBy("sortKey")
+
+        items = []
+        for each sortableItem in sortable
+            items.Push(sortableItem.item)
+        end for
+        return items
+    end function
+
+    function ToContentNode(channelItemsById as object) as object
+        content = CreateObject("roSGNode", "ContentNode")
+        channelNodes = []
+        for each item in SortItemsByAuthor(channelItemsById)
+            channelNode = InvidiousContent.ToChannelContentNode(invalid, item)
+            if channelNode <> invalid
+                ' Innertube channel renderers provide localized text rather than
+                ' a numeric subCount. The shared converter otherwise formats the
+                ' missing count as zero and discards this more accurate value.
+                subCountText = ValidString(item.subCountText)
+                if not StringUtils.IsNullOrEmpty(subCountText)
+                    channelNode.subCountText = subCountText
+                else if not item.DoesExist("subCount") or not IsNumber(item.subCount)
+                    ' Tile renderers commonly omit subscriber counts entirely.
+                    ' Never turn missing data into a false "0 subscribers" label.
+                    channelNode.subCountText = ""
+                end if
+
+                if StringUtils.IsNullOrEmpty(channelNode.authorSubTitle) and IsArray(item.lines)
+                    for each line in item.lines
+                        line = ValidString(line)
+                        if not StringUtils.IsNullOrEmpty(line)
+                            channelNode.authorSubTitle = line
+                            exit for
+                        end if
+                    end for
+                end if
+                channelNodes.Push(channelNode)
+            end if
+        end for
+        content.AppendChildren(channelNodes)
+        return content
+    end function
+
+    function FetchYouTube(auth as ProfileContentAuthTokenUtils.AccessTokenResult, cancellation as object, pageFetcher = invalid as dynamic) as object
+        channelItemsById = NewLookup()
+        pendingContinuations = [""]
+        scheduledContinuations = NewLookup()
+        visitedContinuations = NewLookup()
+        pageCount = 0
+
+        while pendingContinuations.Count() > 0
+            if CancellationUtils.IsCancelled(cancellation)
+                return { cancelled: true }
+            end if
+            if pageCount >= MAX_YOUTUBE_CHANNEL_PAGES
+                return {
+                    error: `Subscribed channel list exceeded the ${MAX_YOUTUBE_CHANNEL_PAGES}-page safety limit`
+                }
+            end if
+
+            continuation = pendingContinuations.Shift()
+            if not StringUtils.IsNullOrEmpty(continuation)
+                scheduledContinuations.Delete(continuation)
+                if visitedContinuations.DoesExist(continuation)
+                    continue while
+                end if
+                visitedContinuations[continuation] = true
+            end if
+
+            options = {
+                cancellation: cancellation
+                accessToken: auth.token
+                onBehalfOfUser: auth.activeIdentifyToken
+            }
+            if not StringUtils.IsNullOrEmpty(continuation)
+                options.continuation = continuation
+            end if
+
+            if pageFetcher = invalid
+                page = InnertubeService.GetChannels(options)
+            else
+                page = pageFetcher.Fetch(options)
+            end if
+            if CancellationUtils.IsCancelled(cancellation)
+                return { cancelled: true }
+            end if
+            if not IsAssociativeArray(page)
+                return { error: "Subscribed channel request returned no data" }
+            end if
+            if page.error <> invalid
+                return { error: "Failed to fetch subscribed channels: " + ToString(page.error) }
+            end if
+
+            pageCount += 1
+            CollectYouTubeFeedItems(page.feeds, channelItemsById)
+            for each nextContinuation in GetContinuations(page.feeds)
+                if visitedContinuations.DoesExist(nextContinuation) or scheduledContinuations.DoesExist(nextContinuation)
+                    continue for
+                end if
+                scheduledContinuations[nextContinuation] = true
+                pendingContinuations.Push(nextContinuation)
+            end for
+        end while
+
+        return { channelItemsById: channelItemsById }
+    end function
+
+end namespace

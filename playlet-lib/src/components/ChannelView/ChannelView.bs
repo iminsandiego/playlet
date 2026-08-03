@@ -47,7 +47,7 @@ function OnNodeready()
     SetSubscribeButtonVisibility()
     DisposableObserveFieldScoped(m.profilesService, "currentProfileChanged", FuncName(SetSubscribeButtonVisibility))
     OnSubscriptionChanged()
-    DisposableObserveFieldScoped(m.invidious, "subscriptions", FuncName(OnSubscriptionChanged))
+    DisposableObserveFieldScoped(m.invidious, "subscriptionsChanged", FuncName(OnSubscriptionsChanged))
 end function
 
 function OnFocusChange() as void
@@ -436,6 +436,10 @@ function OnSubscriptionChanged()
     else
         m.subscribeButton.text = Tr(Locale.Buttons.Subscribe)
     end if
+end function
+
+function OnSubscriptionsChanged() as void
+    FetchSubscriptionStatus()
 end function
 
 function ShowSortDialog(title as string, sortOptions as object, feedContentNode as object) as void

@@ -38,4 +38,5 @@ function ExecuteJob() as void
     end if
 
     channelView.isSubscribed = subscribe
+    invidiousNode.subscriptionsChanged = true
 end function

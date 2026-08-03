@@ -1,0 +1,30 @@
+<component name="SubscribedChannelGridCell" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="OnContentSet" />
+    </interface>
+    <children>
+        <CirclePoster
+            id="thumbnail"
+            width="160"
+            height="160"
+            translation="[8,0]"
+            failedBitmapUri="pkg:/images/thumbnail-missing.jpg" />
+        <Label
+            id="authorLabel"
+            width="176"
+            height="48"
+            maxLines="2"
+            wrap="true"
+            horizAlign="center"
+            translation="[0,168]"
+            font="font:SmallestBoldSystemFont" />
+        <Label
+            id="subtitleLabel"
+            width="176"
+            height="26"
+            maxLines="1"
+            horizAlign="center"
+            translation="[0,218]"
+            font="font:SmallestSystemFont" />
+    </children>
+</component>

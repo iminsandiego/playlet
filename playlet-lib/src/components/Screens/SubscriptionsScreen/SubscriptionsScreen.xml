@@ -1,0 +1,78 @@
+<component name="SubscriptionsScreen" extends="Group" includes="AutoBind,Focus,ContextMenuProvider">
+    <interface>
+        <field id="navBar" type="node" bind="/NavBar" />
+        <field id="appController" type="node" bind="/AppController" />
+        <field id="profilesService" type="node" bind="/ProfilesService" />
+        <field id="invidious" type="node" bind="/Invidious" />
+        <field id="jobQueue" type="node" bind="/JobQueue" />
+        <field id="bookmarksService" type="node" bind="/BookmarksService" />
+        <function name="OpenChannel" />
+        <function name="Refresh" />
+    </interface>
+    <children>
+        <Label
+            id="titleLabel"
+            width="1100"
+            height="54"
+            translation="[90,38]">
+            <Font role="font" uri="font:MediumSystemFontFile" size="36" />
+        </Label>
+
+        <MarkupGrid
+            id="channelsGrid"
+            itemComponentName="SubscribedChannelGridCell"
+            itemSize="[176,248]"
+            itemSpacing="[40,22]"
+            numColumns="5"
+            numRows="2"
+            vertFocusAnimationStyle="floatingFocus"
+            translation="[90,112]"
+            visible="false"
+            focusBitmapUri="pkg:/images/focus-glow-padding-30.$$RES$$.9.png" />
+
+        <Group id="loadingState" visible="false">
+            <BusySpinner
+                id="busySpinner"
+                spinInterval="1"
+                translation="[590,272]" />
+            <Label
+                id="loadingLabel"
+                width="900"
+                height="42"
+                horizAlign="center"
+                translation="[190,400]"
+                font="font:SmallSystemFont" />
+        </Group>
+
+        <Group id="messageState" visible="false">
+            <Label
+                id="messageLabel"
+                width="900"
+                height="80"
+                maxLines="2"
+                wrap="true"
+                horizAlign="center"
+                vertAlign="center"
+                translation="[190,240]">
+                <Font role="font" uri="font:SystemFontFile" size="27" />
+            </Label>
+            <Label
+                id="detailLabel"
+                width="900"
+                height="90"
+                maxLines="3"
+                wrap="true"
+                horizAlign="center"
+                vertAlign="top"
+                translation="[190,330]"
+                font="font:SmallestSystemFont" />
+            <ButtonEx
+                id="actionButton"
+                iconVisible="false"
+                anchor="[0.5,0.5]"
+                minWidth="220"
+                translation="[640,470]"
+                visible="false" />
+        </Group>
+    </children>
+</component>

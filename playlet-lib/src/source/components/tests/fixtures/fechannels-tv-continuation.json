@@ -1,0 +1,34 @@
+{
+    "continuationContents": {
+        "tvSurfaceContentContinuation": {
+            "continuation": {
+                "continuationCommand": {
+                    "token": "TV_CONTINUATION_3"
+                }
+            },
+            "content": {
+                "gridRenderer": {
+                    "items": [
+                        {
+                            "gridChannelRenderer": {
+                                "channelId": "UC_TV_BETA",
+                                "title": {
+                                    "simpleText": "TV Beta"
+                                },
+                                "thumbnail": {
+                                    "thumbnails": [
+                                        {
+                                            "url": "https://example.invalid/tv-beta.jpg",
+                                            "width": 160,
+                                            "height": 160
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}

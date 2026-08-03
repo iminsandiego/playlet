@@ -1,0 +1,61 @@
+{
+    "contents": {
+        "tvBrowseRenderer": {
+            "content": {
+                "tvSecondaryNavRenderer": {
+                    "sections": [
+                        {
+                            "tvSecondaryNavSectionRenderer": {
+                                "tabs": [
+                                    {
+                                        "tabRenderer": {
+                                            "selected": true,
+                                            "title": {
+                                                "simpleText": "Channels"
+                                            },
+                                            "content": {
+                                                "tvSurfaceContentRenderer": {
+                                                    "continuation": {
+                                                        "nextContinuationData": {
+                                                            "continuation": "TV_CONTINUATION_2"
+                                                        }
+                                                    },
+                                                    "content": {
+                                                        "gridRenderer": {
+                                                            "items": [
+                                                                {
+                                                                    "gridChannelRenderer": {
+                                                                        "channelId": "UC_TV_ALPHA",
+                                                                        "title": {
+                                                                            "simpleText": "TV Alpha"
+                                                                        },
+                                                                        "thumbnail": {
+                                                                            "thumbnails": [
+                                                                                {
+                                                                                    "url": "https://example.invalid/tv-alpha.jpg",
+                                                                                    "width": 160,
+                                                                                    "height": 160
+                                                                                }
+                                                                            ]
+                                                                        },
+                                                                        "subscriberCountText": {
+                                                                            "simpleText": "25 subscribers"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}
