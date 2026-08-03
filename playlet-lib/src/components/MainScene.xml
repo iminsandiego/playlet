@@ -29,6 +29,10 @@
                                 text="Home"
                                 icon="pkg:/images/icons/home.png" />
                             <NavBarItemContent
+                                screen="SubscriptionsScreen"
+                                text="Subscriptions"
+                                icon="pkg:/images/icons/user.png" />
+                            <NavBarItemContent
                                 screen="BookmarksScreen"
                                 text="Bookmarks"
                                 icon="pkg:/images/icons/star.png" />

@@ -1,0 +1,70 @@
+import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.bs"
+import "pkg:/components/Services/Invidious/InvidiousService.bs"
+import "pkg:/components/Services/Subscriptions/SubscribedChannels.bs"
+import "pkg:/source/utils/CancellationUtils.bs"
+import "pkg:/source/utils/Types.bs"
+
+@job("SubscribedChannelsJob")
+function ExecuteJob() as void
+    input = JobGetInput()
+    profile = input.profile
+    invidiousNode = input.invidious
+
+    if profile = invalid
+        JobError("A signed-in profile is required to fetch subscribed channels")
+        return
+    end if
+    if JobIsCancelled()
+        JobCancel()
+        return
+    end if
+
+    cancellation = JobGetCancellation()
+    auth = ProfileContentAuthTokenUtils.EnsureFreshAccessToken(profile)
+    if JobIsCancelled() or CancellationUtils.IsCancelled(cancellation)
+        JobCancel()
+        return
+    end if
+    if auth.state <> ProfileContentAuthTokenUtils.AccessTokenState.Ok
+        JobError("No usable access token to fetch subscribed channels: " + auth.state)
+        return
+    end if
+
+    if profile.type = "youtube"
+        result = SubscribedChannels.FetchYouTube(auth, cancellation)
+        if result.cancelled = true
+            JobCancel()
+            return
+        end if
+        if result.error <> invalid
+            JobError(result.error)
+            return
+        end if
+        channelItemsById = result.channelItemsById
+    else if profile.type = "invidious"
+        service = new Invidious.InvidiousService(invidiousNode)
+        response = service.GetSubscriptions(auth, cancellation)
+        if JobIsCancelled() or CancellationUtils.IsCancelled(cancellation)
+            JobCancel()
+            return
+        end if
+        if not response.IsSuccess()
+            JobError("Failed to fetch subscribed channels: " + response.ErrorMessage())
+            return
+        end if
+        subscriptions = response.Json()
+        if not IsArray(subscriptions)
+            JobError("Subscribed channel response was not a list")
+            return
+        end if
+        channelItemsById = SubscribedChannels.NewLookup()
+        SubscribedChannels.CollectInvidiousItems(subscriptions, channelItemsById)
+    else
+        JobError("Unsupported profile type for subscribed channels: " + profile.type)
+        return
+    end if
+
+    ' JobCallback.data is an assocarray field, so the ContentNode is carried in
+    ' a wrapper instead of assigning a node directly to the field.
+    JobSuccessData({ content: SubscribedChannels.ToContentNode(channelItemsById) })
+end function

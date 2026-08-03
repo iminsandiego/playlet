@@ -1,0 +1,221 @@
+import "pkg:/components/Services/Innertube/Parser.bs"
+import "pkg:/components/Services/Subscriptions/SubscribedChannels.bs"
+import "pkg:/source/utils/StringUtils.bs"
+
+namespace Tests
+
+    @suite
+    class SubscribedChannelsTests extends Rooibos.BaseTestSuite
+
+        @describe("SubscribedChannels")
+
+        @it("parses FEchannels channel renderers and its continuation")
+        function _()
+            response = StringUtils.ParseJsonSafe(ReadAsciiFile("pkg:/source/components/tests/fixtures/fechannels.json"))
+            feeds = Innertube.ParseResponseDataForFeeds(response, {
+                response: invalid
+                browseId: "FEchannels"
+            })
+
+            m.assertEqual(feeds.Count(), 1)
+            m.assertEqual(feeds[0].items.Count(), 4)
+            m.assertEqual(feeds[0].items[0].type, "channel")
+            m.assertEqual(feeds[0].items[0].authorId, "UC_ALPHA")
+            m.assertEqual(feeds[0].items[1].type, "channel")
+            m.assertEqual(feeds[0].items[1].authorId, "UC_BETA")
+            m.assertEqual(feeds[0].continuation, "CONTINUATION_2")
+
+            itemsById = SubscribedChannels.NewLookup()
+            SubscribedChannels.CollectYouTubeFeedItems(feeds, itemsById)
+            content = SubscribedChannels.ToContentNode(itemsById)
+            m.assertEqual(content.GetChild(0).subCountText, "10 subscribers")
+            m.assertEqual(content.GetChild(1).subCountText, "")
+        end function
+
+        @it("uses tile metadata without inventing a zero subscriber count")
+        function _()
+            itemsById = SubscribedChannels.NewLookup()
+            SubscribedChannels.CollectYouTubeFeedItems([{
+                items: [{
+                    type: "channel"
+                    authorId: "UC_TILE"
+                    author: "Tile channel"
+                    authorThumbnails: []
+                    lines: ["@tilechannel", "12 videos"]
+                }]
+            }], itemsById)
+
+            content = SubscribedChannels.ToContentNode(itemsById)
+            channel = content.GetChild(0)
+
+            m.assertEqual(channel.authorSubTitle, "@tilechannel")
+            m.assertEqual(channel.subCountText, "")
+        end function
+
+        @it("parses the TV FEchannels shape and its surface continuation")
+        function _()
+            response = StringUtils.ParseJsonSafe(ReadAsciiFile("pkg:/source/components/tests/fixtures/fechannels-tv.json"))
+            feeds = Innertube.ParseResponseDataForFeeds(response, {
+                response: invalid
+                browseId: "FEchannels"
+            })
+
+            m.assertEqual(feeds.Count(), 1)
+            m.assertEqual(feeds[0].items.Count(), 1)
+            m.assertEqual(feeds[0].items[0].authorId, "UC_TV_ALPHA")
+            m.assertEqual(feeds[0].continuation, "TV_CONTINUATION_2")
+        end function
+
+        @it("parses a TV FEchannels continuation page")
+        function _()
+            response = StringUtils.ParseJsonSafe(ReadAsciiFile("pkg:/source/components/tests/fixtures/fechannels-tv-continuation.json"))
+            feeds = Innertube.ParseResponseDataForFeeds(response, {
+                response: invalid
+                browseId: "FEchannels"
+            })
+
+            m.assertEqual(feeds.Count(), 1)
+            m.assertEqual(feeds[0].items.Count(), 1)
+            m.assertEqual(feeds[0].items[0].authorId, "UC_TV_BETA")
+            m.assertEqual(feeds[0].continuation, "TV_CONTINUATION_3")
+        end function
+
+        @it("filters non-channels, deduplicates IDs, and sorts authors case-insensitively")
+        function _()
+            itemsById = SubscribedChannels.NewLookup()
+            feeds = [{
+                items: [
+                    { type: "video", videoId: "not-a-channel" }
+                    { type: "channel", authorId: "UC_Z", author: "zebra" }
+                    { type: "channel", authorId: "UC_A", author: "Alpha" }
+                    { type: "channel", authorId: "UC_Z", author: "duplicate" }
+                    { type: "channel", authorId: "", author: "missing id" }
+                ]
+            }]
+
+            SubscribedChannels.CollectYouTubeFeedItems(feeds, itemsById)
+            sorted = SubscribedChannels.SortItemsByAuthor(itemsById)
+
+            m.assertEqual(sorted.Count(), 2)
+            m.assertEqual(sorted[0].authorId, "UC_A")
+            m.assertEqual(sorted[1].authorId, "UC_Z")
+            m.assertEqual(sorted[1].author, "zebra")
+        end function
+
+        @it("preserves exact case in channel IDs while deduplicating exact IDs")
+        function _()
+            itemsById = SubscribedChannels.NewLookup()
+            SubscribedChannels.CollectInvidiousItems([
+                { authorId: "UC_AbC", author: "First" }
+                { authorId: "UC_aBc", author: "Second" }
+                { authorId: "UC_AbC", author: "Duplicate" }
+            ], itemsById)
+
+            sorted = SubscribedChannels.SortItemsByAuthor(itemsById)
+            m.assertEqual(sorted.Count(), 2)
+            m.assertEqual(sorted[0].author, "First")
+            m.assertEqual(sorted[1].author, "Second")
+        end function
+
+        @it("returns every distinct continuation across multiple feeds")
+        function _()
+            continuations = SubscribedChannels.GetContinuations([
+                { items: [], continuation: "CONT_A" }
+                { items: [], continuation: "CONT_B" }
+                { items: [], continuation: "CONT_A" }
+                { items: [] }
+            ])
+
+            m.assertEqual(continuations, ["CONT_A", "CONT_B"])
+        end function
+
+        @it("exhausts independent continuations and stops repeated continuations")
+        function _()
+            pageFetcher = {
+                calls: []
+                Fetch: function(options as object) as object
+                    continuation = ValidString(options.continuation)
+                    m.calls.Push({
+                        continuation: continuation
+                        onBehalfOfUser: options.onBehalfOfUser
+                    })
+
+                    if continuation = ""
+                        return {
+                            feeds: [{
+                                items: [{ type: "channel", authorId: "UC_A", author: "Alpha" }]
+                                continuation: "CONT_A"
+                            }, {
+                                items: []
+                                continuation: "CONT_B"
+                            }]
+                        }
+                    else if continuation = "CONT_A"
+                        return {
+                            feeds: [{
+                                items: [{ type: "channel", authorId: "UC_B", author: "Beta" }]
+                                continuation: "CONT_C"
+                            }]
+                        }
+                    else if continuation = "CONT_B"
+                        return {
+                            feeds: [{
+                                items: [{ type: "channel", authorId: "UC_A", author: "duplicate" }]
+                                continuation: "CONT_A"
+                            }]
+                        }
+                    else
+                        return {
+                            feeds: [{
+                                items: [{ type: "channel", authorId: "UC_C", author: "Charlie" }]
+                                continuation: "CONT_C"
+                            }]
+                        }
+                    end if
+                end function
+            }
+
+            result = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: "brand-account-token"
+            }, invalid, pageFetcher)
+
+            m.assertInvalid(result.error)
+            m.assertEqual(pageFetcher.calls.Count(), 4)
+            m.assertEqual(pageFetcher.calls[0].continuation, "")
+            m.assertEqual(pageFetcher.calls[1].continuation, "CONT_A")
+            m.assertEqual(pageFetcher.calls[2].continuation, "CONT_B")
+            m.assertEqual(pageFetcher.calls[3].continuation, "CONT_C")
+            m.assertEqual(pageFetcher.calls[0].onBehalfOfUser, "brand-account-token")
+            m.assertEqual(SubscribedChannels.SortItemsByAuthor(result.channelItemsById).Count(), 3)
+        end function
+
+        @it("creates direct sorted ChannelContentNode children")
+        function _()
+            itemsById = SubscribedChannels.NewLookup()
+            SubscribedChannels.CollectInvidiousItems([
+                {
+                    authorId: "UC_B"
+                    author: "bravo"
+                    authorThumbnails: []
+                }
+                {
+                    authorId: "UC_A"
+                    author: "Alpha"
+                    authorThumbnails: []
+                    subCountText: "10 subscribers"
+                }
+            ], itemsById)
+
+            content = SubscribedChannels.ToContentNode(itemsById)
+
+            m.assertEqual(content.GetChildCount(), 2)
+            m.assertEqual(content.GetChild(0).subtype(), "ChannelContentNode")
+            m.assertEqual(content.GetChild(0).authorId, "UC_A")
+            m.assertEqual(content.GetChild(0).subCountText, "10 subscribers")
+            m.assertEqual(content.GetChild(1).authorId, "UC_B")
+        end function
+
+    end class
+
+end namespace

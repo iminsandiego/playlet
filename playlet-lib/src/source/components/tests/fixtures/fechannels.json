@@ -1,0 +1,110 @@
+{
+    "contents": {
+        "singleColumnBrowseResultsRenderer": {
+            "tabs": [
+                {
+                    "tabRenderer": {
+                        "selected": true,
+                        "title": {
+                            "simpleText": "Channels"
+                        },
+                        "content": {
+                            "sectionListRenderer": {
+                                "contents": [
+                                    {
+                                        "itemSectionRenderer": {
+                                            "contents": [
+                                                {
+                                                    "gridRenderer": {
+                                                        "items": [
+                                                            {
+                                                                "gridChannelRenderer": {
+                                                                    "channelId": "UC_ALPHA",
+                                                                    "title": {
+                                                                        "simpleText": "alpha channel"
+                                                                    },
+                                                                    "thumbnail": {
+                                                                        "thumbnails": [
+                                                                            {
+                                                                                "url": "https://example.invalid/alpha.jpg",
+                                                                                "width": 160,
+                                                                                "height": 160
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    "subscriberCountText": {
+                                                                        "simpleText": "10 subscribers"
+                                                                    }
+                                                                }
+                                                            },
+                                                            {
+                                                                "tileRenderer": {
+                                                                    "contentId": "UC_BETA",
+                                                                    "contentType": "TILE_CONTENT_TYPE_CHANNEL",
+                                                                    "header": {
+                                                                        "tileHeaderRenderer": {
+                                                                            "thumbnail": {
+                                                                                "thumbnails": [
+                                                                                    {
+                                                                                        "url": "https://example.invalid/beta.jpg",
+                                                                                        "width": 160,
+                                                                                        "height": 160
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    "metadata": {
+                                                                        "tileMetadataRenderer": {
+                                                                            "title": {
+                                                                                "simpleText": "Beta Channel"
+                                                                            },
+                                                                            "lines": []
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            {
+                                                                "channelRenderer": {
+                                                                    "channelId": "UC_ALPHA",
+                                                                    "title": {
+                                                                        "simpleText": "Duplicate alpha"
+                                                                    },
+                                                                    "thumbnail": {
+                                                                        "thumbnails": []
+                                                                    }
+                                                                }
+                                                            },
+                                                            {
+                                                                "videoRenderer": {
+                                                                    "videoId": "video-is-not-a-channel",
+                                                                    "title": {
+                                                                        "simpleText": "Ignored video"
+                                                                    },
+                                                                    "thumbnail": {
+                                                                        "thumbnails": []
+                                                                    }
+                                                                }
+                                                            }
+                                                        ],
+                                                        "continuations": [
+                                                            {
+                                                                "nextContinuationData": {
+                                                                    "continuation": "CONTINUATION_2"
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}

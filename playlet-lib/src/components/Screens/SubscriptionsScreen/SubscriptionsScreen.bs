@@ -1,0 +1,404 @@
+import "pkg:/components/ChannelView/ChannelUtils.bs"
+import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.types.bs"
+import "pkg:/components/ContextMenu/ContextMenuUtils.bs"
+import "pkg:/components/JobSystem/Jobs.bs"
+import "pkg:/components/JobSystem/JobSystem.bs"
+import "pkg:/components/Navigation/LongPress.bs"
+import "pkg:/components/Navigation/Navigation.bs"
+import "pkg:/source/utils/FocusManagement.bs"
+import "pkg:/source/utils/Locale.bs"
+import "pkg:/source/utils/Logging.bs"
+import "pkg:/source/utils/RemoteKeys.bs"
+import "pkg:/source/utils/StringUtils.bs"
+import "pkg:/source/utils/Types.bs"
+
+const SUBSCRIPTIONS_CACHE_TTL_SECONDS = 300
+
+function Init()
+    m.titleLabel = m.top.findNode("titleLabel")
+    m.channelsGrid = m.top.findNode("channelsGrid")
+    m.loadingState = m.top.findNode("loadingState")
+    m.busySpinner = m.top.findNode("busySpinner")
+    m.loadingLabel = m.top.findNode("loadingLabel")
+    m.messageState = m.top.findNode("messageState")
+    m.messageLabel = m.top.findNode("messageLabel")
+    m.detailLabel = m.top.findNode("detailLabel")
+    m.actionButton = m.top.findNode("actionButton")
+
+    m.titleLabel.text = Tr(Locale.Subscriptions.Title)
+    m.loadingLabel.text = Tr(Locale.Subscriptions.Loading)
+    m.busySpinner.poster.width = 100
+    m.busySpinner.poster.height = 100
+    m.busySpinner.poster.uri = "pkg:/images/spinner.png"
+
+    m.action = ""
+    m.loadCallback = invalid
+    m.loadingProfileId = ""
+    m.contentCache = {}
+    m.restoreAuthorId = ""
+    m.isDirty = true
+    m.top.focusable = true
+
+    m.top.observeField("visible", FuncName(OnVisibleChanged))
+    m.channelsGrid.observeField("itemSelected", FuncName(OnRealItemSelected))
+    m.actionButton.observeField("buttonSelected", FuncName(OnActionSelected))
+end function
+
+function OnNodeReady()
+    SetNavigation(invalid, RemoteKeys.Back, m.navBar)
+    SetNavigation(invalid, RemoteKeys.Left, m.navBar)
+    SetNavigation(m.actionButton, RemoteKeys.Back, m.navBar)
+    SetNavigation(m.actionButton, RemoteKeys.Left, m.navBar)
+
+    m.profilesService.observeFieldScoped("currentProfileChanged", FuncName(OnCurrentProfileChanged))
+    m.invidious.observeFieldScoped("subscriptionsChanged", FuncName(OnSubscriptionsChanged))
+
+    InitializeLongPress(["OK"])
+    LoadIfNeeded()
+end function
+
+function OnFocusChange() as void
+    if not m.top.focus
+        return
+    end if
+    FocusContent()
+end function
+
+function FocusContent() as void
+    content = m.channelsGrid.content
+    if m.channelsGrid.visible and content <> invalid and content.getChildCount() > 0
+        NodeSetFocus(m.channelsGrid, true)
+    else if m.actionButton.visible
+        NodeSetFocus(m.actionButton, true)
+    else
+        NodeSetFocus(m.navBar, true)
+    end if
+end function
+
+function OnVisibleChanged() as void
+    if m.top.visible
+        ' Re-enter through the cache path so its TTL is evaluated instead of
+        ' leaving previously rendered content visible indefinitely.
+        m.isDirty = true
+        LoadIfNeeded()
+    end if
+end function
+
+function OnCurrentProfileChanged() as void
+    MarkDirtyAndReload(false)
+end function
+
+function OnSubscriptionsChanged() as void
+    MarkDirtyAndReload(true)
+end function
+
+function MarkDirtyAndReload(evictCurrentProfile as boolean) as void
+    RememberFocusedChannel()
+    CancelCurrentLoad()
+    if evictCurrentProfile
+        EvictCurrentProfileCache()
+    end if
+    m.channelsGrid.content = invalid
+    m.isDirty = true
+    if m.top.visible
+        LoadIfNeeded()
+    end if
+end function
+
+function Refresh(_unused as dynamic) as void
+    MarkDirtyAndReload(true)
+end function
+
+function LoadIfNeeded() as void
+    if not m.isDirty or not m.top.visible
+        return
+    end if
+
+    ' Visibility can change while the request is still in flight. Keep the
+    ' existing request instead of queuing a duplicate for the same profile.
+    if m.loadCallback <> invalid
+        return
+    end if
+
+    m.isDirty = false
+    profile = m.profilesService.currentProfile
+    if profile = invalid
+        ShowMessage(
+            Tr(Locale.Subscriptions.SignInRequired),
+            Tr(Locale.Subscriptions.SignInRequiredHint),
+            Tr(Locale.Buttons.GoToProfile),
+            "profile"
+        )
+        return
+    end if
+
+    if profile.authState = ProfileContentAuthTokenUtils.ProfileAuthState.NeedsReauth
+        ShowMessage(
+            Tr(Locale.Subscriptions.ReauthRequired),
+            Tr(Locale.Dialogs.ProfileNeedsReauthMessageLine2),
+            Tr(Locale.Buttons.GoToProfile),
+            "profile"
+        )
+        return
+    end if
+
+    profileId = ValidString(profile.id)
+    cachedContent = GetCachedContent(profileId)
+    if cachedContent <> invalid
+        ShowChannelResults(cachedContent)
+        return
+    end if
+
+    ShowLoading()
+    input = {
+        profile: profile
+        invidious: m.invidious
+    }
+    m.loadingProfileId = profileId
+    m.loadCallback = JobSystem.CreateCallback(OnSubscribedChannelsJobDone)
+    JobSystem.QueueJob(m.jobQueue, Jobs.SubscribedChannelsJob, input, m.loadCallback)
+end function
+
+function OnSubscribedChannelsJobDone(event as object) as void
+    callback = event.getRoSGNode()
+    JobSystem.UnobserveCallback(callback)
+    if m.loadCallback = invalid or not callback.isSameNode(m.loadCallback)
+        return
+    end if
+    m.loadCallback = invalid
+
+    info = event.getInfo()
+    if info.cancel
+        m.loadingProfileId = ""
+        return
+    end if
+    if not info.success
+        m.loadingProfileId = ""
+        ShowMessage(
+            Tr(Locale.Subscriptions.LoadError),
+            ValidString(info.error),
+            Tr(Locale.Buttons.Retry),
+            "retry"
+        )
+        return
+    end if
+
+    data = info.data
+    content = invalid
+    if IsAssociativeArray(data)
+        content = data.content
+    end if
+    if content = invalid
+        m.loadingProfileId = ""
+        ShowMessage(
+            Tr(Locale.Subscriptions.LoadError),
+            "",
+            Tr(Locale.Buttons.Retry),
+            "retry"
+        )
+        return
+    end if
+
+    CacheContent(m.loadingProfileId, content)
+    m.loadingProfileId = ""
+
+    ShowChannelResults(content)
+end function
+
+function ShowChannelResults(content as object) as void
+    if content.getChildCount() = 0
+        ShowMessage(
+            Tr(Locale.Subscriptions.NoSubscriptions),
+            Tr(Locale.Subscriptions.NoSubscriptionsHint),
+            "",
+            ""
+        )
+        return
+    end if
+
+    ShowChannels(content)
+end function
+
+function ShowLoading() as void
+    m.channelsGrid.visible = false
+    m.messageState.visible = false
+    m.loadingState.visible = true
+    m.busySpinner.poster.rotation = 0
+    m.busySpinner.visible = true
+    m.busySpinner.control = "start"
+end function
+
+function ShowMessage(message as string, detail as string, actionText as string, action as string) as void
+    StopLoading()
+    m.channelsGrid.visible = false
+    m.messageLabel.text = message
+    m.detailLabel.text = detail
+    m.action = action
+    m.actionButton.text = actionText
+    m.actionButton.visible = not StringUtils.IsNullOrEmpty(actionText)
+    m.messageState.visible = true
+
+    if m.top.isInFocusChain()
+        FocusContent()
+    end if
+end function
+
+function ShowChannels(content as object) as void
+    StopLoading()
+    m.messageState.visible = false
+    m.channelsGrid.content = content
+    m.channelsGrid.visible = true
+    RestoreFocusedChannel(content)
+
+    if m.top.isInFocusChain()
+        FocusContent()
+    end if
+end function
+
+function StopLoading() as void
+    m.loadingState.visible = false
+    m.busySpinner.visible = false
+    m.busySpinner.control = "stop"
+end function
+
+function OnActionSelected() as void
+    if m.action = "retry"
+        m.isDirty = true
+        LoadIfNeeded()
+    else if m.action = "profile"
+        OpenProfileScreen()
+    end if
+end function
+
+function OpenProfileScreen() as void
+    if m.navBar = invalid or m.navBar.itemsList = invalid
+        return
+    end if
+    m.navBar.itemsList.jumpToItem = 0
+    NodeSetFocus(m.navBar, true)
+end function
+
+function OnRealItemSelected() as void
+    LongPressHandler(RemoteKeys.Ok, true)
+end function
+
+function OnKeyEvent(key as string, press as boolean) as boolean
+    if not (key = RemoteKeys.Ok and press)
+        if LongPressHandler(key, press)
+            return true
+        end if
+    end if
+
+    if key = RemoteKeys.OkLongPress and press
+        channel = GetChannelAt(m.channelsGrid.itemFocused)
+        if channel <> invalid
+            ContextMenuUtils.Open([m.top, m.bookmarksService], m.appController, channel)
+        end if
+        return true
+    end if
+
+    if key = RemoteKeys.Ok and not press and m.channelsGrid.hasFocus()
+        channel = GetChannelAt(m.channelsGrid.itemSelected)
+        if channel <> invalid
+            OpenChannel(channel)
+        end if
+        return true
+    end if
+
+    if NavigationKeyHandler(key, press).handled
+        return true
+    end if
+    return false
+end function
+
+function GetChannelAt(index as integer) as dynamic
+    content = m.channelsGrid.content
+    if content = invalid or index < 0 or index >= content.getChildCount()
+        return invalid
+    end if
+    return content.getChild(index)
+end function
+
+function OpenChannel(channel as object) as void
+    if channel = invalid or StringUtils.IsNullOrEmpty(channel.authorId)
+        LogWarn("Cannot open a subscribed channel without an authorId")
+        return
+    end if
+    ChannelUtils.Open(channel, m.appController)
+end function
+
+function GetContextMenuOptionsForItem(channel as object) as object
+    if channel = invalid or channel.type <> "channel"
+        return []
+    end if
+    return [ContextMenuUtils.CreateOption(Tr(Locale.ContextMenu.OpenChannel), m.top, "OpenChannel", [channel])]
+end function
+
+function RememberFocusedChannel() as void
+    channel = GetChannelAt(m.channelsGrid.itemFocused)
+    if channel <> invalid
+        m.restoreAuthorId = channel.authorId
+    end if
+end function
+
+function RestoreFocusedChannel(content as object) as void
+    if StringUtils.IsNullOrEmpty(m.restoreAuthorId)
+        return
+    end if
+    for i = 0 to content.getChildCount() - 1
+        channel = content.getChild(i)
+        if channel.authorId = m.restoreAuthorId
+            m.channelsGrid.jumpToItem = i
+            exit for
+        end if
+    end for
+    m.restoreAuthorId = ""
+end function
+
+function CancelCurrentLoad() as void
+    if m.loadCallback = invalid
+        return
+    end if
+    m.loadCallback.cancel = true
+    JobSystem.UnobserveCallback(m.loadCallback)
+    m.loadCallback = invalid
+    m.loadingProfileId = ""
+end function
+
+function GetCachedContent(profileId as string) as dynamic
+    if StringUtils.IsNullOrEmpty(profileId) or not m.contentCache.doesExist(profileId)
+        return invalid
+    end if
+    entry = m.contentCache[profileId]
+    if entry = invalid or entry.content = invalid or CurrentEpochSeconds() - entry.timestamp >= SUBSCRIPTIONS_CACHE_TTL_SECONDS
+        m.contentCache.delete(profileId)
+        return invalid
+    end if
+    return entry.content
+end function
+
+function CacheContent(profileId as string, content as object) as void
+    if StringUtils.IsNullOrEmpty(profileId) or content = invalid
+        return
+    end if
+    m.contentCache[profileId] = {
+        content: content
+        timestamp: CurrentEpochSeconds()
+    }
+end function
+
+function EvictCurrentProfileCache() as void
+    profile = m.profilesService.currentProfile
+    if profile = invalid
+        return
+    end if
+    profileId = ValidString(profile.id)
+    if not StringUtils.IsNullOrEmpty(profileId)
+        m.contentCache.delete(profileId)
+    end if
+end function
+
+function CurrentEpochSeconds() as longinteger
+    now = CreateObject("roDateTime")
+    return now.AsSeconds()
+end function
