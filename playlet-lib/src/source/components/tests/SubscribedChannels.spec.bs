@@ -1,5 +1,8 @@
 import "pkg:/components/Services/Innertube/Parser.bs"
 import "pkg:/components/Services/Subscriptions/SubscribedChannels.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionsChange.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionStatusRequest.bs"
+import "pkg:/source/utils/CancellationUtils.bs"
 import "pkg:/source/utils/StringUtils.bs"
 
 namespace Tests
@@ -137,6 +140,7 @@ namespace Tests
                     continuation = ValidString(options.continuation)
                     m.calls.Push({
                         continuation: continuation
+                        accessToken: options.accessToken
                         onBehalfOfUser: options.onBehalfOfUser
                     })
 
@@ -186,8 +190,141 @@ namespace Tests
             m.assertEqual(pageFetcher.calls[1].continuation, "CONT_A")
             m.assertEqual(pageFetcher.calls[2].continuation, "CONT_B")
             m.assertEqual(pageFetcher.calls[3].continuation, "CONT_C")
-            m.assertEqual(pageFetcher.calls[0].onBehalfOfUser, "brand-account-token")
+            for each call in pageFetcher.calls
+                m.assertEqual(call.accessToken, "access-token")
+                m.assertEqual(call.onBehalfOfUser, "brand-account-token")
+            end for
             m.assertEqual(SubscribedChannels.SortItemsByAuthor(result.channelItemsById).Count(), 3)
+        end function
+
+        @it("cancels before and immediately after a page fetch")
+        function _()
+            cancelNode = CreateObject("roSGNode", "ContentNode")
+            cancelNode.AddField("cancel", "boolean", false)
+            cancellation = CancellationUtils.CreateCancellation(cancelNode, "cancel", true)
+            pageFetcher = {
+                calls: 0
+                cancelNode: cancelNode
+                Fetch: function(_options as object) as object
+                    m.calls += 1
+                    m.cancelNode.cancel = true
+                    return {
+                        feeds: [{
+                            items: [{ type: "channel", authorId: "UC_IGNORED", author: "Ignored" }]
+                        }]
+                    }
+                end function
+            }
+
+            cancelNode.cancel = true
+            result = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: ""
+            }, cancellation, pageFetcher)
+            m.assertTrue(result.cancelled)
+            m.assertEqual(pageFetcher.calls, 0)
+
+            cancelNode.cancel = false
+            result = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: ""
+            }, cancellation, pageFetcher)
+            m.assertTrue(result.cancelled)
+            m.assertEqual(pageFetcher.calls, 1)
+            m.assertInvalid(result.channelItemsById)
+        end function
+
+        @it("fails closed for malformed pages, endpoint errors, and the page safety limit")
+        function _()
+            malformedFetcher = {
+                Fetch: function(_options as object) as dynamic
+                    return invalid
+                end function
+            }
+            malformed = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: ""
+            }, invalid, malformedFetcher)
+            m.assertEqual(malformed.error, "Subscribed channel request returned no data")
+
+            errorFetcher = {
+                Fetch: function(_options as object) as object
+                    return { error: "backend failure" }
+                end function
+            }
+            failed = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: ""
+            }, invalid, errorFetcher)
+            m.assertTrue(Instr(1, failed.error, "backend failure") > 0)
+
+            endlessFetcher = {
+                calls: 0
+                Fetch: function(_options as object) as object
+                    m.calls += 1
+                    return {
+                        feeds: [{
+                            items: [{ type: "channel", authorId: "UC_" + ToString(m.calls), author: "Channel" }]
+                            continuation: "CONT_" + ToString(m.calls)
+                        }]
+                    }
+                end function
+            }
+            limited = SubscribedChannels.FetchYouTube({
+                token: "access-token"
+                activeIdentifyToken: ""
+            }, invalid, endlessFetcher)
+            m.assertEqual(endlessFetcher.calls, SubscribedChannels.MAX_YOUTUBE_CHANNEL_PAGES)
+            m.assertTrue(Instr(1, limited.error, "safety limit") > 0)
+            m.assertInvalid(limited.channelItemsById)
+        end function
+
+        @it("targets subscription invalidation to the mutated profile and channel")
+        function _()
+            profileA = { id: "PROFILE_A" }
+            profileB = { id: "PROFILE_B" }
+            change = SubscriptionsChange.Create(profileA, "UC_A", true)
+            cache = {
+                PROFILE_A: { content: "a" }
+                PROFILE_B: { content: "b" }
+            }
+
+            shouldReloadB = SubscriptionsChange.EvictCacheForChange(cache, change, profileB)
+
+            m.assertFalse(shouldReloadB)
+            m.assertFalse(cache.DoesExist("PROFILE_A"))
+            m.assertTrue(cache.DoesExist("PROFILE_B"))
+            m.assertTrue(SubscriptionsChange.MatchesProfile(change, profileA))
+            m.assertTrue(SubscriptionsChange.MatchesChannel(change, "UC_A"))
+            m.assertFalse(SubscriptionsChange.MatchesChannel(change, "UC_B"))
+        end function
+
+        @it("ignores a stale status callback after a replacement request")
+        function _()
+            callbackA = CreateObject("roSGNode", "ContentNode")
+            callbackB = CreateObject("roSGNode", "ContentNode")
+            currentCallback = callbackB
+            isSubscribed = false
+            success = {
+                success: true
+                data: { isSubscribed: true }
+            }
+
+            if SubscriptionStatusRequest.IsCurrent(callbackA, currentCallback)
+                result = SubscriptionStatusRequest.ParseResult(success)
+                if result.hasValue
+                    isSubscribed = result.isSubscribed
+                end if
+            end if
+            m.assertFalse(isSubscribed)
+
+            if SubscriptionStatusRequest.IsCurrent(callbackB, currentCallback)
+                result = SubscriptionStatusRequest.ParseResult(success)
+                if result.hasValue
+                    isSubscribed = result.isSubscribed
+                end if
+            end if
+            m.assertTrue(isSubscribed)
         end function
 
         @it("creates direct sorted ChannelContentNode children")

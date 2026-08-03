@@ -4,6 +4,8 @@ import "pkg:/components/Dialog/DialogUtils.bs"
 import "pkg:/components/JobSystem/Jobs.bs"
 import "pkg:/components/JobSystem/JobSystem.bs"
 import "pkg:/components/Navigation/Navigation.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionsChange.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionStatusRequest.bs"
 import "pkg:/source/utils/DisposableObserve.bs"
 import "pkg:/source/utils/FocusManagement.bs"
 import "pkg:/source/utils/Locale.bs"
@@ -167,10 +169,7 @@ function OnDispose()
         m.subscribeJob.cancel = true
         m.subscribeJob = invalid
     end if
-    if m.fetchSubscriptionStatusJob <> invalid
-        m.fetchSubscriptionStatusJob.cancel = true
-        m.fetchSubscriptionStatusJob = invalid
-    end if
+    CancelFetchSubscriptionStatus()
 end function
 
 function OnSubscribeButtonSelected() as void
@@ -189,9 +188,7 @@ function OnSubscribeButtonSelected() as void
     if m.subscribeJob <> invalid
         m.subscribeJob.cancel = true
     end if
-    if m.fetchSubscriptionStatusJob <> invalid
-        m.fetchSubscriptionStatusJob.cancel = true
-    end if
+    CancelFetchSubscriptionStatus()
 
     input = {
         channelView: m.top
@@ -415,7 +412,6 @@ function FetchSubscriptionStatus() as void
     end if
 
     input = {
-        channelView: m.top
         ucid: authorId
         profile: profile
         invidious: m.invidious
@@ -426,7 +422,26 @@ function FetchSubscriptionStatus() as void
 end function
 
 function OnFetchSubscriptionStatusDone(event as object) as void
-    JobSystem.UnobserveCallback(event.getRoSGNode())
+    callback = event.getRoSGNode()
+    JobSystem.UnobserveCallback(callback)
+    if not SubscriptionStatusRequest.IsCurrent(callback, m.fetchSubscriptionStatusJob)
+        return
+    end if
+    m.fetchSubscriptionStatusJob = invalid
+
+    result = SubscriptionStatusRequest.ParseResult(event.getInfo())
+    if not result.hasValue
+        return
+    end if
+    m.top.isSubscribed = result.isSubscribed
+end function
+
+function CancelFetchSubscriptionStatus() as void
+    if m.fetchSubscriptionStatusJob = invalid
+        return
+    end if
+    m.fetchSubscriptionStatusJob.cancel = true
+    JobSystem.UnobserveCallback(m.fetchSubscriptionStatusJob)
     m.fetchSubscriptionStatusJob = invalid
 end function
 
@@ -438,7 +453,13 @@ function OnSubscriptionChanged()
     end if
 end function
 
-function OnSubscriptionsChanged() as void
+function OnSubscriptionsChanged(event as object) as void
+    change = event.getData()
+    if not SubscriptionsChange.MatchesProfile(change, m.profilesService.currentProfile) or not SubscriptionsChange.MatchesChannel(change, m.top.authorId)
+        return
+    end if
+
+    CancelFetchSubscriptionStatus()
     FetchSubscriptionStatus()
 end function
 

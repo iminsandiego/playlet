@@ -5,6 +5,7 @@ import "pkg:/components/JobSystem/JobSystem.bs"
 import "pkg:/components/Navigation/LongPress.bs"
 import "pkg:/components/PlaylistView/PlaylistUtils.bs"
 import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionsChange.bs"
 import "pkg:/components/VideoFeed/FeedLoadState.bs"
 import "pkg:/source/utils/DisposableObserve.bs"
 import "pkg:/source/utils/ErrorUtils.bs"
@@ -218,7 +219,10 @@ function OnCurrentProfileChanged()
     InitContent()
 end function
 
-function OnSubscriptionsChanged() as void
+function OnSubscriptionsChanged(event as object) as void
+    if not SubscriptionsChange.MatchesProfile(event.getData(), m.profilesService.currentProfile)
+        return
+    end if
     if not HasSubscriptionsFeed(m.top.feeds)
         return
     end if

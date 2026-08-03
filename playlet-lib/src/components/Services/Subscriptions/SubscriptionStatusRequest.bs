@@ -1,0 +1,32 @@
+import "pkg:/source/utils/Types.bs"
+
+namespace SubscriptionStatusRequest
+
+    function IsCurrent(callback as dynamic, currentCallback as dynamic) as boolean
+        if callback = invalid or currentCallback = invalid
+            return false
+        end if
+        return callback.IsSameNode(currentCallback)
+    end function
+
+    function ParseResult(info as dynamic) as object
+        if not IsAssociativeArray(info)
+            return { hasValue: false }
+        end if
+        if info.success <> true
+            return { hasValue: false }
+        end if
+        data = info.data
+        if not IsAssociativeArray(data)
+            return { hasValue: false }
+        end if
+        if not data.DoesExist("isSubscribed")
+            return { hasValue: false }
+        end if
+        return {
+            hasValue: true
+            isSubscribed: data.isSubscribed
+        }
+    end function
+
+end namespace

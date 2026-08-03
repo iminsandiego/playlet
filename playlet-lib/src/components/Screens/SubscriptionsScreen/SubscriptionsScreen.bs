@@ -5,6 +5,7 @@ import "pkg:/components/JobSystem/Jobs.bs"
 import "pkg:/components/JobSystem/JobSystem.bs"
 import "pkg:/components/Navigation/LongPress.bs"
 import "pkg:/components/Navigation/Navigation.bs"
+import "pkg:/components/Services/Subscriptions/SubscriptionsChange.bs"
 import "pkg:/source/utils/FocusManagement.bs"
 import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/Logging.bs"
@@ -88,8 +89,11 @@ function OnCurrentProfileChanged() as void
     MarkDirtyAndReload(false)
 end function
 
-function OnSubscriptionsChanged() as void
-    MarkDirtyAndReload(true)
+function OnSubscriptionsChanged(event as object) as void
+    change = event.getData()
+    if SubscriptionsChange.EvictCacheForChange(m.contentCache, change, m.profilesService.currentProfile)
+        MarkDirtyAndReload(false)
+    end if
 end function
 
 function MarkDirtyAndReload(evictCurrentProfile as boolean) as void
@@ -393,6 +397,10 @@ function EvictCurrentProfileCache() as void
         return
     end if
     profileId = ValidString(profile.id)
+    EvictProfileCache(profileId)
+end function
+
+function EvictProfileCache(profileId as string) as void
     if not StringUtils.IsNullOrEmpty(profileId)
         m.contentCache.delete(profileId)
     end if
