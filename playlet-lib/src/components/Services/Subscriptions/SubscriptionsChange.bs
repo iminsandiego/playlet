@@ -1,0 +1,57 @@
+import "pkg:/source/utils/Types.bs"
+
+namespace SubscriptionsChange
+
+    function Create(profile as dynamic, channelId as string, isSubscribed as boolean) as object
+        profileId = ""
+        if profile <> invalid
+            profileId = ValidString(profile.id)
+        end if
+
+        return {
+            profileId: profileId
+            channelId: channelId
+            isSubscribed: isSubscribed
+        }
+    end function
+
+    function ProfileId(change as dynamic) as string
+        if not IsAssociativeArray(change)
+            return ""
+        end if
+        return ValidString(change.profileId)
+    end function
+
+    function GetChannelId(change as dynamic) as string
+        if not IsAssociativeArray(change)
+            return ""
+        end if
+        return ValidString(change.channelId)
+    end function
+
+    function MatchesProfile(change as dynamic, profile as dynamic) as boolean
+        changedProfileId = ProfileId(change)
+        if changedProfileId = ""
+            ' Preserve compatibility with older unscoped notifications.
+            return true
+        end if
+        return profile <> invalid and changedProfileId = ValidString(profile.id)
+    end function
+
+    function MatchesChannel(change as dynamic, channelId as string) as boolean
+        changedChannelId = GetChannelId(change)
+        return changedChannelId = "" or changedChannelId = channelId
+    end function
+
+    function EvictCacheForChange(cache as object, change as dynamic, currentProfile as dynamic) as boolean
+        changedProfileId = ProfileId(change)
+        if changedProfileId = "" and currentProfile <> invalid
+            changedProfileId = ValidString(currentProfile.id)
+        end if
+        if changedProfileId <> ""
+            cache.Delete(changedProfileId)
+        end if
+        return MatchesProfile(change, currentProfile)
+    end function
+
+end namespace

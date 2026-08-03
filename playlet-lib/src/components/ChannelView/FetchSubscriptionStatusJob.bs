@@ -7,7 +7,6 @@ import "pkg:/source/utils/CancellationUtils.bs"
 function ExecuteJob() as void
     input = JobGetInput()
 
-    channelView = input.channelView
     ucid = input.ucid
     invidiousNode = input.invidious
     profile = input.profile
@@ -36,7 +35,7 @@ function ExecuteJob() as void
             JobError("Failed to fetch subscription status: " + ToString(subscriptionStatus.error))
             return
         end if
-        channelView.isSubscribed = subscriptionStatus.isSubscribed
+        isSubscribed = subscriptionStatus.isSubscribed
     else
         service = new Invidious.InvidiousService(invidiousNode)
         subscriptionsResponse = service.GetSubscriptions(auth, cancellation)
@@ -53,6 +52,11 @@ function ExecuteJob() as void
                 exit for
             end if
         end for
-        channelView.isSubscribed = isSubscribed
     end if
+
+    if JobIsCancelled() or CancellationUtils.IsCancelled(cancellation)
+        JobCancel()
+        return
+    end if
+    JobSuccessData({ isSubscribed: isSubscribed })
 end function
