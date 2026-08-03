@@ -1,0 +1,18 @@
+<component name="SubscriptionsScreenTestHarness" extends="SubscriptionsScreen">
+    <interface>
+        <field id="testFixturePages" type="array" />
+        <field id="testFixtureProbe" type="node" />
+        <field id="testLoadState" type="string" alwaysNotify="true" />
+        <field id="testOpenedChannelId" type="string" />
+        <function name="TestSetup" />
+        <function name="TestTeardown" />
+        <function name="TestSnapshot" />
+        <function name="TestWaitForState" />
+        <function name="TestSelect" />
+        <function name="TestPressBack" />
+        <function name="TestSetFixturePages" />
+        <function name="TestRetry" />
+        <function name="TestHideAndShow" />
+        <function name="TestPublishSubscriptionsChange" />
+    </interface>
+</component>

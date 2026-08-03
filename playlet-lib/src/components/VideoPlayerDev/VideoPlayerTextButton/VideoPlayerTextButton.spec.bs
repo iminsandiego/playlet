@@ -29,8 +29,8 @@ namespace Tests
             label = m.top.findNode("label")
             m.assertEqual(background.subtype(), "Poster")
             m.assertEqual(background.uri, "pkg:/images/icons/player/white-circle.png")
-            m.assertEqual(background.width, 42)
-            m.assertEqual(background.height, 42)
+            m.assertEqual(background.width, 42.0)
+            m.assertEqual(background.height, 42.0)
             m.assertTrue(label.getParent().isSameNode(background.getParent()))
         end function
 

@@ -1,0 +1,157 @@
+import "pkg:/components/Services/Subscriptions/SubscriptionsChange.bs"
+import "pkg:/source/roku_modules/rooibos_promises/promises.d.bs"
+import "pkg:/source/utils/RemoteKeys.bs"
+import "pkg:/source/utils/TimeUtils.bs"
+
+function TestSetup(fixturePages as object, signedIn as boolean) as void
+    TestTeardown()
+
+    m.testJobQueue = CreateObject("roSGNode", "JobQueue")
+    m.testProfilesService = CreateObject("roSGNode", "ContentNode")
+    m.testProfilesService.addField("currentProfile", "node", false)
+    m.testProfilesService.addField("currentProfileChanged", "boolean", true)
+    m.testInvidious = CreateObject("roSGNode", "ContentNode")
+    m.testInvidious.addField("subscriptionsChanged", "assocarray", true)
+    m.testNavBar = CreateObject("roSGNode", "ContentNode")
+    m.testNavBar.addField("itemsList", "node", false)
+    m.testNavBar.itemsList = CreateObject("roSGNode", "ContentNode")
+    m.testNavBar.focusable = true
+    m.testAppController = CreateObject("roSGNode", "ContentNode")
+    m.testBookmarksService = CreateObject("roSGNode", "ContentNode")
+    m.testFixtureProbe = CreateObject("roSGNode", "ContentNode")
+    m.testFixtureProbe.addField("calls", "integer", false)
+    m.testFixtureProbe.addField("lastAccessToken", "string", false)
+    m.testFixtureProbe.addField("lastOnBehalfOfUser", "string", false)
+
+    if signedIn
+        m.testProfile = CreateObject("roSGNode", "ProfileContentNode")
+        m.testProfile.update({
+            id: "fixture-profile"
+            type: "youtube"
+            username: "Fixture User"
+            accessToken: "fixture-access-token"
+            refreshToken: "fixture-refresh-token"
+            expiresTimestamp: TimeUtils.Now().AsSeconds() + 7200
+            activeIdentifyToken: "fixture-brand-account"
+            authState: "Authenticated"
+        })
+        m.testProfilesService.currentProfile = m.testProfile
+    else
+        m.testProfile = invalid
+    end if
+
+    m.jobQueue = m.testJobQueue
+    m.profilesService = m.testProfilesService
+    m.invidious = m.testInvidious
+    m.navBar = m.testNavBar
+    m.appController = m.testAppController
+    m.bookmarksService = m.testBookmarksService
+    m.top.jobQueue = m.testJobQueue
+    m.top.profilesService = m.testProfilesService
+    m.top.invidious = m.testInvidious
+    m.top.navBar = m.testNavBar
+    m.top.appController = m.testAppController
+    m.top.bookmarksService = m.testBookmarksService
+    m.top.testFixturePages = fixturePages
+    m.top.testFixtureProbe = m.testFixtureProbe
+    m.top.testLoadState = ""
+    m.top.testOpenedChannelId = ""
+    m.top.observeFieldScoped("testLoadState", FuncName(TestOnLoadStateChanged))
+
+    m.loadCallback = invalid
+    m.loadingProfileId = ""
+    m.contentCache = {}
+    m.restoreAuthorId = ""
+    m.isDirty = true
+    m.channelsGrid.content = invalid
+    m.top.visible = false
+    OnNodeReady()
+    m.top.visible = true
+end function
+
+function TestWaitForState(expectedState as string) as object
+    m.testExpectedState = expectedState
+    m.testStatePromise = rooibos.promises.create()
+    if m.top.testLoadState = expectedState
+        rooibos.promises.resolve(TestSnapshot(), m.testStatePromise)
+    end if
+    return m.testStatePromise
+end function
+
+function TestOnLoadStateChanged() as void
+    if m.testStatePromise <> invalid and m.top.testLoadState = m.testExpectedState
+        promise = m.testStatePromise
+        m.testStatePromise = invalid
+        rooibos.promises.resolve(TestSnapshot(), promise)
+    end if
+end function
+
+function TestTeardown() as void
+    CancelCurrentLoad()
+    if m.testJobQueue <> invalid
+        m.testJobQueue.shutdown = true
+        m.testJobQueue = invalid
+    end if
+end function
+
+function TestSnapshot() as object
+    authorIds = []
+    content = m.channelsGrid.content
+    if content <> invalid
+        for each channel in content.getChildren(-1, 0)
+            authorIds.push(channel.authorId)
+        end for
+    end if
+
+    probeCalls = 0
+    accessToken = ""
+    onBehalfOfUser = ""
+    if m.testFixtureProbe <> invalid
+        probeCalls = m.testFixtureProbe.calls
+        accessToken = m.testFixtureProbe.lastAccessToken
+        onBehalfOfUser = m.testFixtureProbe.lastOnBehalfOfUser
+    end if
+
+    return {
+        state: m.top.testLoadState
+        authorIds: authorIds
+        itemFocused: m.channelsGrid.itemFocused
+        openedChannelId: m.top.testOpenedChannelId
+        message: m.messageLabel.text
+        detail: m.detailLabel.text
+        action: m.actionButton.text
+        probeCalls: probeCalls
+        accessToken: accessToken
+        onBehalfOfUser: onBehalfOfUser
+        navBarFocused: m.testNavBar.isInFocusChain()
+    }
+end function
+
+function TestSelect(index as integer) as boolean
+    m.channelsGrid.itemFocused = index
+    NodeSetFocus(m.channelsGrid, true)
+    m.channelsGrid.itemSelected = index
+    return OnKeyEvent(RemoteKeys.Ok, false)
+end function
+
+function TestPressBack() as boolean
+    NodeSetFocus(m.channelsGrid, true)
+    return OnKeyEvent(RemoteKeys.Back, true)
+end function
+
+function TestSetFixturePages(fixturePages as object) as void
+    m.top.testFixturePages = fixturePages
+end function
+
+function TestRetry() as void
+    OnActionSelected()
+end function
+
+function TestHideAndShow() as void
+    m.top.visible = false
+    m.top.visible = true
+end function
+
+function TestPublishSubscriptionsChange() as void
+    m.testInvidious.subscriptionsChanged = SubscriptionsChange.Create(m.testProfile, "UC_TV_ALPHA", true)
+end function
