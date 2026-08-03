@@ -6,6 +6,7 @@
         <field id="profilesService" type="node" />
 
         <field id="apiDefinitions" type="assocarray" />
+        <field id="subscriptionsChanged" type="boolean" alwaysNotify="true" />
 
         <function name="GetInstance" />
         <function name="GetInvidiousInstance" />

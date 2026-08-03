@@ -367,6 +367,12 @@ namespace InnertubeService
         return GetBrowseAuthenticatedPage("FEsubscriptions", options)
     end function
 
+    ' The subscriptions feed above contains recent videos. FEchannels is the
+    ' authenticated account's distinct list of subscribed channels.
+    function GetChannels(options = invalid as object) as object
+        return GetBrowseAuthenticatedPage("FEchannels", options)
+    end function
+
     function GetWatchHistory(options = invalid as object) as object
         return GetBrowseAuthenticatedPage("FEhistory", options)
     end function

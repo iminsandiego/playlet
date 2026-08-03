@@ -33,6 +33,20 @@ namespace Locale
         Refresh = "Refresh"
         PlayNextVideo = "Play next video"
         Clear = "Clear"
+        Retry = "Retry"
+        GoToProfile = "Go to Profile"
+    end enum
+
+    @locale
+    enum Subscriptions
+        Title = "Subscribed channels"
+        Loading = "Loading subscribed channels..."
+        SignInRequired = "Sign in to view your subscribed channels."
+        SignInRequiredHint = "Choose a profile to use your YouTube or Invidious subscriptions."
+        ReauthRequired = "Your session has expired. Sign in again to view your subscribed channels."
+        NoSubscriptions = "You aren't subscribed to any channels yet."
+        NoSubscriptionsHint = "Subscribe from a channel page, then come back here."
+        LoadError = "Couldn't load your subscribed channels."
     end enum
 
     @locale

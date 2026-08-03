@@ -77,6 +77,46 @@
         <translation>Subscriptions</translation>
     </message>
     <message>
+        <source>Subscribed channels</source>
+        <translation>Subscribed channels</translation>
+    </message>
+    <message>
+        <source>Loading subscribed channels...</source>
+        <translation>Loading subscribed channels...</translation>
+    </message>
+    <message>
+        <source>Sign in to view your subscribed channels.</source>
+        <translation>Sign in to view your subscribed channels.</translation>
+    </message>
+    <message>
+        <source>Choose a profile to use your YouTube or Invidious subscriptions.</source>
+        <translation>Choose a profile to use your YouTube or Invidious subscriptions.</translation>
+    </message>
+    <message>
+        <source>Your session has expired. Sign in again to view your subscribed channels.</source>
+        <translation>Your session has expired. Sign in again to view your subscribed channels.</translation>
+    </message>
+    <message>
+        <source>You aren&apos;t subscribed to any channels yet.</source>
+        <translation>You aren&apos;t subscribed to any channels yet.</translation>
+    </message>
+    <message>
+        <source>Subscribe from a channel page, then come back here.</source>
+        <translation>Subscribe from a channel page, then come back here.</translation>
+    </message>
+    <message>
+        <source>Couldn&apos;t load your subscribed channels.</source>
+        <translation>Couldn&apos;t load your subscribed channels.</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Retry</translation>
+    </message>
+    <message>
+        <source>Go to Profile</source>
+        <translation>Go to Profile</translation>
+    </message>
+    <message>
         <source>Recommended</source>
         <translation>Recommended</translation>
     </message>

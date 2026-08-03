@@ -1,0 +1,32 @@
+import "pkg:/source/utils/StringUtils.bs"
+
+function Init()
+    m.thumbnail = m.top.findNode("thumbnail")
+    m.authorLabel = m.top.findNode("authorLabel")
+    m.subtitleLabel = m.top.findNode("subtitleLabel")
+end function
+
+function OnContentSet() as void
+    content = m.top.itemContent
+    if content = invalid
+        m.thumbnail.uri = ""
+        m.authorLabel.text = ""
+        m.subtitleLabel.text = ""
+        return
+    end if
+
+    m.thumbnail.uri = content.thumbnail
+    m.authorLabel.text = content._author
+
+    subtitle = content.channelHandle
+    if StringUtils.IsNullOrEmpty(subtitle)
+        subtitle = content.authorSubTitle
+    end if
+    if StringUtils.IsNullOrEmpty(subtitle)
+        subtitle = content.subCountText
+    end if
+    if StringUtils.IsNullOrEmpty(subtitle)
+        subtitle = content.videoCountText
+    end if
+    m.subtitleLabel.text = subtitle
+end function

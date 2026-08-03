@@ -16,6 +16,7 @@ import "pkg:/source/utils/Types.bs"
 ' E.g. Subscriptions, Watch History and Playlists can be empty
 function Init()
     m.pendingLoadJobs = {}
+    m.subscriptionsContentStale = false
 end function
 
 function OnNodeReady()
@@ -25,7 +26,7 @@ function OnNodeReady()
     DisposableObserveField(m.top, "focusedChild", FuncName(OnFocusedChildChange))
     DisposableObserveField(m.top, "visible", FuncName(OnVisibilityChange))
 
-    ' TODO:P1 Reload when subscriptions change
+    DisposableObserveFieldScoped(m.invidious, "subscriptionsChanged", FuncName(OnSubscriptionsChanged))
     DisposableObserveFieldScoped(m.profilesService, "currentProfileChanged", FuncName(OnCurrentProfileChanged))
     InitializeLongPress(["OK"])
 end function
@@ -38,7 +39,12 @@ end function
 
 function OnVisibilityChange()
     if m.top.visible = true
-        LoadRowsIfNeeded()
+        if m.subscriptionsContentStale
+            m.subscriptionsContentStale = false
+            InitContent()
+        else
+            LoadRowsIfNeeded()
+        end if
     end if
 end function
 
@@ -210,6 +216,38 @@ function OnCurrentProfileChanged()
     ' TODO:P2: Reload only content that is authenticated
     ' Should not reload if the page is not visible. Instead, capture state and reload when the page becomes visible
     InitContent()
+end function
+
+function OnSubscriptionsChanged() as void
+    if not HasSubscriptionsFeed(m.top.feeds)
+        return
+    end if
+
+    if m.top.visible
+        InitContent()
+    else
+        m.subscriptionsContentStale = true
+    end if
+end function
+
+function HasSubscriptionsFeed(feeds as dynamic) as boolean
+    if not IsArray(feeds)
+        return false
+    end if
+
+    for each feed in feeds
+        if not IsAssociativeArray(feed) or not IsArray(feed.feedSources)
+            continue for
+        end if
+
+        for each feedSource in feed.feedSources
+            if IsAssociativeArray(feedSource) and (ValidString(feedSource.id) = "inv_auth_feed" or ValidString(feedSource.endpoint) = "auth_feed")
+                return true
+            end if
+        end for
+    end for
+
+    return false
 end function
 
 function InitContent() as void

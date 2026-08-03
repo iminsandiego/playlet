@@ -1446,8 +1446,8 @@ namespace Innertube
         return nodeData["content"]
     end function
 
-    function ParseTvSurfaceContentRenderer(nodeData as object, _context as object) as object
-        ' TODO: handle tvSurfaceContentRenderer.continuation
+    function ParseTvSurfaceContentRenderer(nodeData as object, context as object) as object
+        ParseTvSurfaceContinuation(nodeData, context)
         return nodeData["content"]
     end function
 
@@ -1950,9 +1950,23 @@ namespace Innertube
         return nodeData["items"]
     end function
 
-    function ParseTvSurfaceContentContinuation(nodeData as object, _context as object) as object
+    function ParseTvSurfaceContentContinuation(nodeData as object, context as object) as object
+        ParseTvSurfaceContinuation(nodeData, context)
         ' title = ParseText(ObjectUtils.Dig(nodeData, ["header", "tvSurfaceHeaderRenderer", "title"]))
         return nodeData["content"]
+    end function
+
+    function ParseTvSurfaceContinuation(nodeData as object, context as object) as void
+        continuation = ValidString(nodeData["continuation"])
+        if StringUtils.IsNullOrEmpty(continuation)
+            continuation = ValidString(ObjectUtils.Dig(nodeData, ["continuation", "nextContinuationData", "continuation"]))
+        end if
+        if StringUtils.IsNullOrEmpty(continuation)
+            continuation = ValidString(ObjectUtils.Dig(nodeData, ["continuation", "continuationCommand", "token"]))
+        end if
+        if not StringUtils.IsNullOrEmpty(continuation)
+            context.currentFeed.continuation = continuation
+        end if
     end function
 
     function ParseGridButtonRenderer(nodeData as object, context as object) as object
