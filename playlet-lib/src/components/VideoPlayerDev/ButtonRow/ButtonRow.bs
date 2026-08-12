@@ -3,16 +3,18 @@ import "pkg:/components/VideoPlayerDev/TransportController.bs"
 import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/Types.bs"
 
-' Trackbar track spans x=68..1212: right cluster right-aligns to 1212, center cluster centers on 640.
+' Trackbar track spans x=68..1212: creator left-aligns to 68, transport centers on 640, features right-align to 1212.
 const ROW_Y = 560
 const BUTTON_WIDTH = 42
 const BUTTON_SPACING = 20
+const TRACKBAR_LEFT_X = 68
 const SCREEN_CENTER_X = 640
 const TRACKBAR_RIGHT_X = 1212
 
 function Init()
     ' Focus order MUST match PlayerCoordinatorLogic.PlayerButton.
     m.buttons = [
+        m.top.findNode("ChannelButton")
         m.top.findNode("PreviousButton")
         m.top.findNode("PlayPauseButton")
         m.top.findNode("NextButton")
@@ -24,12 +26,14 @@ function Init()
         m.top.findNode("MinimizeButton")
     ]
     m.focusLabel = m.top.findNode("FocusLabel")
+    m.channelButton = m.top.findNode("ChannelButton")
+    m.leftCluster = m.top.findNode("LeftCluster")
     m.centerCluster = m.top.findNode("CenterCluster")
     m.rightCluster = m.top.findNode("RightCluster")
     LayoutClusters()
     m.top.buttonCount = m.buttons.Count() ' coordinator reads this to clamp focus
 
-    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "nextEnabled", "qualityLabel", "qualityDescription", "speedLabel", "speedEnabled", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
+    for each field in ["transportMode", "rowFocused", "focusedIndex", "playing", "previousEnabled", "nextEnabled", "channelAvailable", "channelThumbnail", "channelName", "qualityLabel", "qualityDescription", "speedLabel", "speedEnabled", "captionsEnabled", "statsEnabled", "bookmarkAvailable", "bookmarked"]
         m.top.ObserveField(field, FuncName(Repaint))
     end for
     m.top.ObserveField("nudge", FuncName(OnNudge))
@@ -47,8 +51,10 @@ end function
 ' Position the buttons inside each cluster and the clusters on screen, all from child count, so adding a
 ' button auto-positions without hardcoded offsets.
 function LayoutClusters() as void
+    LayoutButtons(m.leftCluster)
     LayoutButtons(m.centerCluster)
     LayoutButtons(m.rightCluster)
+    m.leftCluster.translation = [TRACKBAR_LEFT_X, ROW_Y]
     m.centerCluster.translation = [SCREEN_CENTER_X - ClusterWidth(m.centerCluster) / 2, ROW_Y]
     m.rightCluster.translation = [TRACKBAR_RIGHT_X - ClusterWidth(m.rightCluster), ROW_Y]
 end function
@@ -57,6 +63,9 @@ function LayoutButtons(cluster as object) as void
     x = 0
     for i = 0 to cluster.getChildCount() - 1
         button = cluster.getChild(i)
+        if not button.visible
+            continue for
+        end if
         button.translation = [x, 0]
         x += ButtonWidth(button) + BUTTON_SPACING
     end for
@@ -67,9 +76,18 @@ function ClusterWidth(cluster as object) as integer
     if n <= 0
         return 0
     end if
-    width = (n - 1) * BUTTON_SPACING
+    visibleCount = 0
+    width = 0
     for i = 0 to n - 1
-        width += ButtonWidth(cluster.getChild(i))
+        button = cluster.getChild(i)
+        if not button.visible
+            continue for
+        end if
+        if visibleCount > 0
+            width += BUTTON_SPACING
+        end if
+        width += ButtonWidth(button)
+        visibleCount += 1
     end for
     return width
 end function
@@ -89,18 +107,25 @@ function Repaint() as void
     ' fades the parent group, so visible=true with a hidden parent stays unpainted.
     m.top.visible = (m.top.transportMode = TransportController.Mode.Idle)
 
-    m.buttons[0].disabled = not m.top.previousEnabled
-    m.buttons[1].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
-    m.buttons[2].disabled = not m.top.nextEnabled
-    m.buttons[3].text = m.top.qualityLabel
-    m.buttons[4].text = m.top.speedLabel
-    m.buttons[4].disabled = not m.top.speedEnabled
-    m.buttons[5].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
-    m.buttons[5].active = m.top.captionsEnabled
-    m.buttons[6].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
-    m.buttons[6].active = m.top.statsEnabled
-    m.buttons[7].disabled = not m.top.bookmarkAvailable
-    m.buttons[7].active = m.top.bookmarked
+    m.buttons[1].disabled = not m.top.previousEnabled
+    m.buttons[2].toggleState = not m.top.playing ' toggleState false = pause icon, true = play icon
+    m.buttons[3].disabled = not m.top.nextEnabled
+    channelVisibilityChanged = m.channelButton.visible <> m.top.channelAvailable
+    m.channelButton.visible = m.top.channelAvailable
+    m.channelButton.disabled = not m.top.channelAvailable
+    m.channelButton.avatarUri = m.top.channelThumbnail
+    if channelVisibilityChanged
+        LayoutClusters()
+    end if
+    m.buttons[4].text = m.top.qualityLabel
+    m.buttons[5].text = m.top.speedLabel
+    m.buttons[5].disabled = not m.top.speedEnabled
+    m.buttons[6].toggleState = not m.top.captionsEnabled ' toggleState false = cc-on icon
+    m.buttons[6].active = m.top.captionsEnabled
+    m.buttons[7].toggleState = not m.top.statsEnabled ' toggleState false = stats-on icon
+    m.buttons[7].active = m.top.statsEnabled
+    m.buttons[8].disabled = not m.top.bookmarkAvailable
+    m.buttons[8].active = m.top.bookmarked
 
     for i = 0 to m.buttons.Count() - 1
         m.buttons[i].focused = m.top.rowFocused and i = m.top.focusedIndex
@@ -121,6 +146,12 @@ function FocusLabelFor(index as integer) as string
         return Tr(Locale.VideoPlayer.Play)
     else if index = PlayerCoordinatorLogic.PlayerButton.NextVideo
         return Tr(Locale.VideoPlayer.NextVideo)
+    else if index = PlayerCoordinatorLogic.PlayerButton.Channel
+        label = Tr(Locale.ContextMenu.OpenChannel)
+        if m.top.channelName <> ""
+            label += ": " + m.top.channelName
+        end if
+        return label
     else if index = PlayerCoordinatorLogic.PlayerButton.Quality
         return Tr(Locale.Settings.DefaultQuality) + ": " + m.top.qualityDescription
     else if index = PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed

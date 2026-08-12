@@ -1,0 +1,29 @@
+namespace Tests
+
+    @SGNode("ChannelAvatarButton")
+    @suite
+    class ChannelAvatarButtonTests extends Rooibos.BaseTestSuite
+
+        @describe("compact creator action")
+
+        @it("uses a circular avatar with a generic fallback")
+        function _()
+            m.top.avatarUri = ""
+            m.assertEqual(m.top.findNode("avatar").uri, "pkg:/images/icons/user-200.png")
+
+            m.top.avatarUri = "https://example.com/avatar.jpg"
+            m.assertEqual(m.top.findNode("avatar").uri, "https://example.com/avatar.jpg")
+        end function
+
+        @it("shows only a thin light focus ring when selected")
+        function _()
+            m.top.focused = false
+            m.assertEqual(m.top.findNode("focusRing").blendColor, &h3C3C3CFF)
+
+            m.top.focused = true
+            m.assertEqual(m.top.findNode("focusRing").blendColor, &hDDDDDDFF)
+        end function
+
+    end class
+
+end namespace
