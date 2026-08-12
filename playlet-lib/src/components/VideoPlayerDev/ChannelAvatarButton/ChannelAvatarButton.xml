@@ -1,0 +1,28 @@
+<component name="ChannelAvatarButton" extends="Group">
+    <!-- Compact creator action for the player button row. The real remote focus remains on the Video node;
+         the coordinator projects virtual focus here just like the other player buttons. -->
+    <interface>
+        <field id="avatarUri" type="uri" onChange="Repaint" />
+        <field id="focused" type="boolean" value="false" onChange="OnFocused" />
+        <field id="disabled" type="boolean" value="false" onChange="Repaint" />
+        <field id="buttonWidth" type="integer" value="42" />
+        <field id="nudge" type="boolean" alwaysNotify="true" onChange="OnNudge" />
+    </interface>
+    <children>
+        <Group id="anchor">
+            <Poster id="focusRing"
+                uri="pkg:/images/icons/player/white-circle.png"
+                width="42" height="42" blendColor="0x3C3C3CFF" />
+            <CirclePoster id="avatar"
+                width="34" height="34" translation="[4,4]"
+                failedBitmapUri="pkg:/images/icons/user-200.png"
+                loadingBitmapUri="pkg:/images/icons/user-200.png" />
+        </Group>
+        <Animation id="nudgeAnim" optional="true" duration="0.15">
+            <Vector2DFieldInterpolator id="nudgeScale"
+                key="[ 0.0, 0.5, 1.0 ]"
+                keyValue="[ [ 1.0, 1.0 ], [ 1.05, 1.05 ], [ 1.0, 1.0 ] ]"
+                fieldToInterp="anchor.scale" />
+        </Animation>
+    </children>
+</component>

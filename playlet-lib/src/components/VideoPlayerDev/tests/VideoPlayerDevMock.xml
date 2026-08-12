@@ -47,6 +47,7 @@
         <field id="nudgeCount" type="integer" />
         <field id="queuePreviousCount" type="integer" />
         <field id="queueNextCount" type="integer" />
+        <field id="testOpenedChannelId" type="string" />
         <!-- the Video-only method Initialize calls, plus the spec's drivers (callFunc reaches only interface funcs). -->
         <function name="getHttpAgent" />
         <function name="TestSetup" />
@@ -57,6 +58,7 @@
         <function name="TestSetControl" />
         <function name="TestSetLive" />
         <function name="TestSetVideoId" />
+        <function name="TestSetChannelInfo" />
         <function name="TestAddBookmarkExternally" />
         <function name="TestSaveQuality" />
         <function name="TestCloseQuality" />

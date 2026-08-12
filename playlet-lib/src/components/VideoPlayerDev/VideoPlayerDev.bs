@@ -1,8 +1,10 @@
+import "pkg:/components/ChannelView/ChannelUtils.bs"
 import "pkg:/components/ContentNode/ProfileContentAuthTokenUtils.types.bs"
 import "pkg:/components/Dialog/DialogUtils.bs"
 import "pkg:/components/JobSystem/Jobs.bs"
 import "pkg:/components/JobSystem/JobSystem.bs"
 import "pkg:/components/Services/Innertube/Constants.bs"
+import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
 import "pkg:/components/VideoPlayer/Lounge.bs"
 import "pkg:/components/VideoPlayerDev/ErrorDialogController.bs"
 import "pkg:/components/VideoPlayerDev/PlayerCoordinatorLogic.bs"
@@ -364,12 +366,9 @@ function OnKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
 
-    ' Focus model (only while the chrome is up + idle): the BUTTON tier takes the directional + select keys; the
-    ' BAR tier takes Up (back to the buttons) and lets the transport keys through. Rev/Fwd/Replay are not owned
-    ' by the buttons, so they fall through to the transport and move focus to the bar.
+    ' Focus model (only while the chrome is up + idle): buttons -> bar.
     if press and CanFocusInteract()
-        ' Up/Down move between the two tiers; a no-op at the ends is still consumed — Up at the top tier
-        ' (the buttons) pulses the focused button so the press visibly lands somewhere.
+        ' Up/Down move between the two tiers.
         if key = RemoteKeys.Up or key = RemoteKeys.Down
             newTarget = PlayerCoordinatorLogic.NextFocusTarget(m.focusTarget, key)
             if newTarget <> m.focusTarget
@@ -386,8 +385,7 @@ function OnKeyEvent(key as string, press as boolean) as boolean
         end if
     end if
 
-    ' Up/Down also reveal the chrome when it is hidden in idle (they otherwise do nothing); once the chrome is
-    ' up the block above moves focus instead.
+    ' Up/Down reveal hidden chrome at the normal bar tier.
     if press and (key = RemoteKeys.Up or key = RemoteKeys.Down) and m.transport.transportMode = TransportController.Mode.Idle
         if not (m.chromeMode = ChromeMode.Shown or m.chromeMode = ChromeMode.FadingIn)
             ShowChrome()
@@ -543,9 +541,8 @@ function ApplyBackAction(action as integer) as void
 end function
 
 '===============================================================================
-' FOCUS (two-tier virtual focus) — the real focus stays on the Video node. Two tiers: the BAR (default on
-' reveal; Left/Right scrub, the cursor grows) and the BUTTONS. Up/Down move between them; both exist only while
-' the chrome is up and idle.
+' FOCUS (two-tier virtual focus) — the real focus stays on the Video node. The BAR remains the normal reveal
+' default, with the playback BUTTONS above it.
 '===============================================================================
 function CanFocusInteract() as boolean
     chromeShown = (m.chromeMode = ChromeMode.Shown or m.chromeMode = ChromeMode.FadingIn)
@@ -566,7 +563,7 @@ end function
 ' don't own (Play/Rev/Fwd/Replay/Back) so those fall through to the transport / play-pause / close.
 function HandleButtonsKey(key as string) as boolean
     if key = RemoteKeys.Left or key = RemoteKeys.Right
-        newIndex = PlayerCoordinatorLogic.NextEnabledButtonIndex(m.focusedButton, key, m.buttonRow.buttonCount, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable)
+        newIndex = PlayerCoordinatorLogic.NextEnabledButtonIndex(m.focusedButton, key, m.buttonRow.buttonCount, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable, CanOpenCurrentChannel())
         if newIndex = m.focusedButton
             ' clamped at the row's end: pulse the focused button so the press visibly lands somewhere.
             m.buttonRow.nudge = true
@@ -600,6 +597,9 @@ function ActivateButton(index as integer) as void
         HideChromeNow()
         m.videoQueue.next = true
         return
+    else if index = PlayerCoordinatorLogic.PlayerButton.Channel
+        OpenCurrentVideoChannel()
+        return
     else if index = PlayerCoordinatorLogic.PlayerButton.Quality
         OpenQualitySelector()
         return
@@ -620,8 +620,8 @@ function ActivateButton(index as integer) as void
 end function
 
 ' Push the focus state to the renderers. The button row highlights its focused button while the BUTTON tier
-' holds focus; the trackbar's cursor grows while the BAR tier holds focus. Both are gated on the chrome being
-' up, so nothing reads as focused while the chrome is hidden.
+' holds focus; the trackbar's cursor grows while the BAR tier holds focus. All HUD tiers are gated on the
+' chrome being up, so nothing reads as focused while the chrome is hidden.
 function SyncFocus() as void
     if not IsPlayerButtonEnabled(m.focusedButton)
         m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlayPause
@@ -643,6 +643,86 @@ function SyncFocus() as void
     m.trickPlayBar.focused = chromeShown and (m.focusTarget = PlayerCoordinatorLogic.FocusTarget.Bar)
 end function
 
+' Return the currently loaded video's channel identity. Player metadata supplies authorId for both built-in
+' YouTube and Invidious playback; author/thumbnail are presentation-only and have safe fallbacks.
+function CurrentChannelInfo() as object
+    content = m.top.content
+    if content = invalid or not IsAssociativeArray(content.metadata)
+        return invalid
+    end if
+
+    metadata = content.metadata
+    authorId = ValidString(metadata.authorId)
+    if StringUtils.IsNullOrEmpty(authorId)
+        return invalid
+    end if
+
+    author = ValidString(metadata.author)
+    if StringUtils.IsNullOrEmpty(author)
+        author = ValidString(content.secondaryTitle)
+    end if
+
+    thumbnail = ""
+    thumbnails = ValidArray(metadata.authorThumbnails)
+    for each candidate in thumbnails
+        url = ValidString(candidate.url)
+        if not StringUtils.IsNullOrEmpty(url)
+            thumbnail = url
+        end if
+    end for
+
+    return {
+        authorId: authorId
+        author: author
+        authorThumbnails: thumbnails
+        thumbnail: thumbnail
+    }
+end function
+
+function CanOpenCurrentChannel() as boolean
+    return CurrentChannelInfo() <> invalid
+end function
+
+function SyncChannelButton() as void
+    info = CurrentChannelInfo()
+    available = info <> invalid
+    m.buttonRow.channelAvailable = available
+    if available
+        m.buttonRow.channelName = info.author
+        m.buttonRow.channelThumbnail = info.thumbnail
+    else
+        m.buttonRow.channelName = ""
+        m.buttonRow.channelThumbnail = ""
+        if m.focusedButton = PlayerCoordinatorLogic.PlayerButton.Channel
+            m.focusedButton = PlayerCoordinatorLogic.PlayerButton.PlayPause
+            m.buttonRow.focusedIndex = m.focusedButton
+        end if
+    end if
+end function
+
+function OpenCurrentVideoChannel() as void
+    info = CurrentChannelInfo()
+    if info = invalid
+        SyncFocus()
+        ArmAutoHide()
+        return
+    end if
+
+    #if TEST_MODE
+        if m.top.hasField("testOpenedChannelId")
+            m.top.testOpenedChannelId = info.authorId
+            return
+        end if
+    #end if
+
+    channel = InvidiousContent.ToChannelContentNode(invalid, info)
+    HideChromeNow()
+    if m.container.fullscreen
+        VideoQueueUtils.ToggleVideoPictureInPicture(m.videoQueue)
+    end if
+    ChannelUtils.Open(channel, m.appController)
+end function
+
 function HasPreviousQueueItem() as boolean
     if m.videoQueue = invalid
         return false
@@ -658,7 +738,7 @@ function HasNextQueueItem() as boolean
 end function
 
 function IsPlayerButtonEnabled(index as integer) as boolean
-    return PlayerCoordinatorLogic.ButtonEnabled(index, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable)
+    return PlayerCoordinatorLogic.ButtonEnabled(index, HasPreviousQueueItem(), m.transport.isLive, HasNextQueueItem(), m.bookmarkAvailable, CanOpenCurrentChannel())
 end function
 
 function OnQueueAvailabilityChange(_event as object) as void
@@ -1915,6 +1995,7 @@ function UpdateOverlayMeta() as void
     ' the loading overlay shows the same title + secondary title while loading.
     m.spinner.title = title
     m.spinner.secondaryTitle = secondaryTitle
+    SyncChannelButton()
 end function
 
 '-------------------------------------------------------------------------------

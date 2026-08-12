@@ -3,9 +3,10 @@
          highlighted (focusedIndex) and whether the row has focus (rowFocused). `visible` is gated on idle so the
          row rides the parent Chrome group's opacity fade instead of popping.
 
-         CenterCluster is centered on screen, RightCluster is right-aligned; each is a plain Group whose
-         buttons + position are laid out in code from its child count. (Not a LayoutGroup: it re-aligns a child
-         whenever its bounding rect changes, which pins the scale pulse's corner and makes it grow off-center.)
+         LeftCluster is aligned to the trackbar's left edge, CenterCluster is centered on screen, and
+         RightCluster is right-aligned. Each is a plain Group whose buttons + position are laid out in code from
+         its child count. (Not a LayoutGroup: it re-aligns a child whenever its bounding rect changes, which pins
+         the scale pulse's corner and makes it grow off-center.)
 
          To add a button, do all four or focus/activation breaks:
            1. drop a VideoPlayerButton into a cluster (xml below);
@@ -15,10 +16,13 @@
     <interface>
         <field id="transportMode" type="integer" value="0" />
         <field id="rowFocused" type="boolean" value="false" />
-        <field id="focusedIndex" type="integer" value="1" />
+        <field id="focusedIndex" type="integer" value="2" />
         <field id="playing" type="boolean" value="true" /> <!-- selects the play vs pause icon -->
         <field id="previousEnabled" type="boolean" value="false" />
         <field id="nextEnabled" type="boolean" value="false" />
+        <field id="channelAvailable" type="boolean" value="false" />
+        <field id="channelThumbnail" type="uri" />
+        <field id="channelName" type="string" value="" />
         <!-- Current values are shown directly on compact player-bar buttons. -->
         <field id="qualityLabel" type="string" value="" />
         <field id="qualityDescription" type="string" value="" />
@@ -35,6 +39,11 @@
         <field id="nudge" type="boolean" alwaysNotify="true" />
     </interface>
     <children>
+        <!-- Creator identity/action, left-aligned to the trackbar. Its separation from the centered transport
+             controls keeps it from reading as another playback command. -->
+        <Group id="LeftCluster">
+            <ChannelAvatarButton id="ChannelButton" visible="false" />
+        </Group>
         <!-- Queue + transport controls, centered on screen (x=640). -->
         <Group id="CenterCluster">
             <VideoPlayerButton id="PreviousButton"

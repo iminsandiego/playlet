@@ -72,6 +72,7 @@ function TestSetup() as void
     m.top.videoQueue = videoQueue
     m.top.queuePreviousCount = 0
     m.top.queueNextCount = 0
+    m.top.testOpenedChannelId = ""
     videoQueue.observeFieldScoped("previous", FuncName(OnTestQueuePrevious))
     videoQueue.observeFieldScoped("next", FuncName(OnTestQueueNext))
     m.top.loungeService = createObject("roSGNode", "Node")
@@ -102,6 +103,7 @@ function TestSetup() as void
     end for
     m.top.globalCaptionMode = "Off"
     m.top.content = invalid
+    SyncChannelButton()
 
     OnNodeReady()
 end function
@@ -155,6 +157,24 @@ function TestSetVideoId(videoId as string) as void
     content.videoId = videoId
     m.top.content = content
     SyncBookmarkState()
+end function
+
+function TestSetChannelInfo(authorId as string, author as string, thumbnail = "" as string) as void
+    content = CreateObject("roSGNode", "ContentNode")
+    content.addField("metadata", "assocarray", false)
+    thumbnails = []
+    if thumbnail <> ""
+        thumbnails.Push({ url: thumbnail })
+    end if
+    content.metadata = {
+        authorId: authorId
+        author: author
+        authorThumbnails: thumbnails
+    }
+    content.secondaryTitle = author
+    m.top.content = content
+    SyncChannelButton()
+    SyncFocus()
 end function
 
 function TestAddBookmarkExternally(videoId as string) as void
@@ -296,6 +316,12 @@ function TestSnapshot() as object
         captionsActive: m.buttonRow.findNode("CaptionsButton").active
         focusTarget: m.focusTarget
         focusedButton: m.focusedButton
+        channelAvailable: m.buttonRow.channelAvailable
+        channelFocused: m.buttonRow.findNode("ChannelButton").focused
+        channelVisible: m.buttonRow.findNode("ChannelButton").visible
+        channelAuthor: m.buttonRow.channelName
+        channelThumbnail: m.buttonRow.channelThumbnail
+        openedChannelId: m.top.testOpenedChannelId
         statsEnabled: m.statsEnabled
         statsOverlayPresent: m.statsForNerds <> invalid
         statsOverlayVisible: m.statsForNerds <> invalid and m.statsForNerds.visible

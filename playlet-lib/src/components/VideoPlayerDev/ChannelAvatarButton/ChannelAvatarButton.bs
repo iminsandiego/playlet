@@ -1,0 +1,46 @@
+function Init() as void
+    m.anchor = m.top.findNode("anchor")
+    m.focusRing = m.top.findNode("focusRing")
+    m.avatar = m.top.findNode("avatar")
+    m.nudgeAnim = m.top.findNode("nudgeAnim")
+    m.anchor.scaleRotateCenter = [21, 21]
+    Repaint()
+end function
+
+function OnFocused() as void
+    Repaint()
+    if m.top.focused and not m.top.disabled
+        Pulse()
+    end if
+end function
+
+function OnNudge() as void
+    if not m.top.disabled
+        Pulse()
+    end if
+end function
+
+function Pulse() as void
+    m.nudgeAnim.control = "stop"
+    m.nudgeAnim.control = "start"
+end function
+
+function Repaint() as void
+    uri = m.top.avatarUri
+    if uri = ""
+        uri = "pkg:/images/icons/user-200.png"
+    end if
+    m.avatar.uri = uri
+
+    if m.top.focused and not m.top.disabled
+        m.focusRing.blendColor = "#DDDDDDFF"
+    else
+        m.focusRing.blendColor = "#3C3C3CFF"
+    end if
+
+    if m.top.disabled
+        m.top.opacity = 0.4
+    else
+        m.top.opacity = 1.0
+    end if
+end function

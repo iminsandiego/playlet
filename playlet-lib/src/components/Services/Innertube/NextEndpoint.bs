@@ -4,6 +4,7 @@ import "pkg:/components/Services/Innertube/protos/params.proto.gen.bs"
 import "pkg:/source/services/HttpClient.bs"
 import "pkg:/source/utils/Logging.bs"
 import "pkg:/source/utils/ObjectUtils.bs"
+import "pkg:/source/utils/StringUtils.bs"
 import "pkg:/source/utils/Types.bs"
 
 namespace Innertube
@@ -38,6 +39,19 @@ namespace Innertube
         if not IsAssociativeArray(payload)
             LogWarn("Invalid payload", payload)
             return parsedResponse
+        end if
+
+        owner = ParseVideoOwnerMetadata(payload)
+        if owner <> invalid
+            if StringUtils.IsNullOrEmpty(parsedResponse.author) and not StringUtils.IsNullOrEmpty(owner.author)
+                parsedResponse.author = owner.author
+            end if
+            if StringUtils.IsNullOrEmpty(parsedResponse.authorId) and not StringUtils.IsNullOrEmpty(owner.authorId)
+                parsedResponse.authorId = owner.authorId
+            end if
+            if IsArray(owner.authorThumbnails) and owner.authorThumbnails.Count() > 0
+                parsedResponse.authorThumbnails = owner.authorThumbnails
+            end if
         end if
 
         playerOverlayRenderer = ObjectUtils.Dig(payload, ["playerOverlays", "playerOverlayRenderer"])
@@ -78,6 +92,35 @@ namespace Innertube
         end if
 
         return parsedResponse
+    end function
+
+    ' The WEB /next response carries the creator avatar separately from the /player videoDetails. Preserve it
+    ' in player metadata so the living-room HUD can show the real channel identity without an extra request.
+    function ParseVideoOwnerMetadata(payload as object) as dynamic
+        contentPaths = [
+            ["contents", "twoColumnWatchNextResults", "results", "results", "contents"]
+            ["contents", "singleColumnWatchNextResults", "results", "results", "contents"]
+        ]
+
+        for each path in contentPaths
+            contents = ObjectUtils.Dig(payload, path)
+            if not IsArray(contents)
+                continue for
+            end if
+            for each content in contents
+                renderer = ObjectUtils.Dig(content, ["videoSecondaryInfoRenderer", "owner", "videoOwnerRenderer"])
+                if not IsAssociativeArray(renderer)
+                    continue for
+                end if
+                return {
+                    author: ParseText(renderer.title)
+                    authorId: ValidString(ObjectUtils.Dig(renderer, ["title", "runs", 0, "navigationEndpoint", "browseEndpoint", "browseId"]))
+                    authorThumbnails: ValidArray(ObjectUtils.Dig(renderer, ["thumbnail", "thumbnails"]))
+                }
+            end for
+        end for
+
+        return invalid
     end function
 
 end namespace

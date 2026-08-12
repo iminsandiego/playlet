@@ -254,30 +254,35 @@ namespace Tests
             quality = PlayerCoordinatorLogic.PlayerButton.Quality
             previous = PlayerCoordinatorLogic.PlayerButton.Previous
 
-            ' With a previous item, Left from Play reaches it; otherwise the focus clamps.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 9, true, false, false, false), previous)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 9, false, false, false, false), play)
+            ' With a previous item, Left from Play reaches it; otherwise an unavailable creator also clamps at Play.
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 10, true, false, false, false, false), previous)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 10, false, false, false, false, false), play)
 
-            ' At both queue ends with no video id, skip Next and Bookmark.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 9, false, true, false, false), quality)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(quality, RemoteKeys.Left, 9, false, true, false, false), play)
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.Stats, RemoteKeys.Right, 9, false, true, false, false), PlayerCoordinatorLogic.PlayerButton.Minimize)
+            ' At both queue ends with no channel or video id, skip Next, Channel, and Bookmark.
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 10, false, true, false, false, false), quality)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(quality, RemoteKeys.Left, 10, false, true, false, false, false), play)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(PlayerCoordinatorLogic.PlayerButton.Stats, RemoteKeys.Right, 10, false, true, false, false, false), PlayerCoordinatorLogic.PlayerButton.Minimize)
+
+            ' With channel metadata and no Previous item, the far-left creator action is directly left of Play.
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Left, 10, false, false, false, false, true), PlayerCoordinatorLogic.PlayerButton.Channel)
 
             ' An available Next item remains directly adjacent to Play.
-            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 9, false, true, true, false), PlayerCoordinatorLogic.PlayerButton.NextVideo)
+            m.assertEqual(PlayerCoordinatorLogic.NextEnabledButtonIndex(play, RemoteKeys.Right, 10, false, true, true, false, false), PlayerCoordinatorLogic.PlayerButton.NextVideo)
         end function
 
         @it("the availability decision matches queue ends and bookmark semantics")
         function _()
-            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, false, false, true, false))
-            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, true, false, false, false))
-            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, true, false, false, false))
-            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, false, true, true, false))
-            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, false, false, false))
-            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, true, false, false))
-            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Captions, false, true, false, false))
-            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, true, false, true, false))
-            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, false, true, false, true))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, false, false, true, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Previous, true, false, false, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, true, false, false, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.NextVideo, false, true, true, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Channel, false, false, false, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Channel, false, false, false, false, true))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, false, false, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.PlaybackSpeed, false, true, false, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Captions, false, true, false, false, false))
+            m.assertFalse(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, true, false, true, false, false))
+            m.assertTrue(PlayerCoordinatorLogic.ButtonEnabled(PlayerCoordinatorLogic.PlayerButton.Bookmark, false, true, false, true, false))
         end function
 
         @it("summarizes the full quality preference for the compact button")
@@ -307,7 +312,7 @@ namespace Tests
             m.assertFalse(PlayerCoordinatorLogic.IsSupportedPlaybackSpeed("3.0"))
         end function
 
-        @it("Up/Down move focus between the bar and the buttons, no wrap")
+        @it("Up/Down move focus between buttons and bar without wrapping")
         function _()
             buttons = PlayerCoordinatorLogic.FocusTarget.Buttons
             bar = PlayerCoordinatorLogic.FocusTarget.Bar
