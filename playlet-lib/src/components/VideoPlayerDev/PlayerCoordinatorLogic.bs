@@ -47,19 +47,19 @@ namespace PlayerCoordinatorLogic
     ' The buttons in the row above the trackbar, in focus order (the index). The COUNT is owned by ButtonRow
     ' (m.buttons / its buttonCount field) — there is no separate count constant to keep in sync.
     enum PlayerButton
-        Previous = 0
-        PlayPause = 1
-        NextVideo = 2
-        Quality = 3
-        PlaybackSpeed = 4
-        Captions = 5
-        Stats = 6
-        Bookmark = 7
-        Minimize = 8
+        Channel = 0
+        Previous = 1
+        PlayPause = 2
+        NextVideo = 3
+        Quality = 4
+        PlaybackSpeed = 5
+        Captions = 6
+        Stats = 7
+        Bookmark = 8
+        Minimize = 9
     end enum
 
-    ' The two focus targets above/at the trackbar: the bar itself (Left/Right scrub, the cursor grows) and the
-    ' button row above it (Left/Right move between buttons). Up/Down move between the two tiers.
+    ' The two focus targets in the HUD: the bar and the button row above it.
     enum FocusTarget
         Bar = 0
         Buttons = 1
@@ -171,11 +171,13 @@ namespace PlayerCoordinatorLogic
 
     ' Availability is a coordinator decision so virtual focus can skip disabled controls just as a real
     ' SceneGraph focus chain would. Queue ends disable Previous/Next.
-    function ButtonEnabled(index as integer, hasPrevious as boolean, _isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as boolean
+    function ButtonEnabled(index as integer, hasPrevious as boolean, _isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean, channelAvailable as boolean) as boolean
         if index = PlayerButton.Previous
             return hasPrevious
         else if index = PlayerButton.NextVideo
             return hasNext
+        else if index = PlayerButton.Channel
+            return channelAvailable
         else if index = PlayerButton.PlaybackSpeed
             return not _isLive
         else if index = PlayerButton.Bookmark
@@ -186,10 +188,10 @@ namespace PlayerCoordinatorLogic
 
     ' Move one direction until an enabled button is found, clamping at the row edge. Disabled controls remain
     ' visible (dimmed) but never become the standing virtual focus target.
-    function NextEnabledButtonIndex(current as integer, key as string, count as integer, hasPrevious as boolean, isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean) as integer
+    function NextEnabledButtonIndex(current as integer, key as string, count as integer, hasPrevious as boolean, isLive as boolean, hasNext as boolean, bookmarkAvailable as boolean, channelAvailable as boolean) as integer
         candidate = NextButtonIndex(current, key, count)
         while candidate <> current
-            if ButtonEnabled(candidate, hasPrevious, isLive, hasNext, bookmarkAvailable)
+            if ButtonEnabled(candidate, hasPrevious, isLive, hasNext, bookmarkAvailable, channelAvailable)
                 return candidate
             end if
             nextCandidate = NextButtonIndex(candidate, key, count)
@@ -248,8 +250,7 @@ namespace PlayerCoordinatorLogic
         return false
     end function
 
-    ' Move focus between the tiers: Down goes buttons -> bar; Up goes bar -> buttons. No wrap (the buttons are
-    ' the top tier, the bar the bottom).
+    ' Move focus between the two tiers. There is no wrap.
     function NextFocusTarget(current as integer, key as string) as integer
         if key = RemoteKeys.Down and current = FocusTarget.Buttons
             return FocusTarget.Bar

@@ -1,0 +1,67 @@
+import "pkg:/components/Services/Innertube/NextEndpoint.bs"
+
+namespace Tests
+
+    @suite
+    class NextEndpointTests extends Rooibos.BaseTestSuite
+
+        @describe("video owner metadata")
+
+        @it("extracts channel identity and avatar from the watch-next response")
+        function _()
+            payload = {
+                contents: {
+                    twoColumnWatchNextResults: {
+                        results: {
+                            results: {
+                                contents: [{
+                                    videoSecondaryInfoRenderer: {
+                                        owner: {
+                                            videoOwnerRenderer: {
+                                                title: {
+                                                    runs: [{
+                                                        text: "Example Creator"
+                                                        navigationEndpoint: {
+                                                            browseEndpoint: { browseId: "UC_CREATOR" }
+                                                        }
+                                                    }]
+                                                }
+                                                thumbnail: {
+                                                    thumbnails: [
+                                                        { url: "https://example.com/avatar-48.jpg", width: 48, height: 48 }
+                                                        { url: "https://example.com/avatar-176.jpg", width: 176, height: 176 }
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                }]
+                            }
+                        }
+                    }
+                }
+            }
+
+            owner = Innertube.ParseVideoOwnerMetadata(payload)
+            m.assertEqual(owner.author, "Example Creator")
+            m.assertEqual(owner.authorId, "UC_CREATOR")
+            m.assertEqual(owner.authorThumbnails.Count(), 2)
+            m.assertEqual(owner.authorThumbnails[1].url, "https://example.com/avatar-176.jpg")
+
+            merged = Innertube.ParseInnertubeNextResponse(payload, {
+                author: "Player Author"
+                authorId: "UC_PLAYER"
+            }, invalid)
+            m.assertEqual(merged.author, "Player Author", "the /player identity stays authoritative")
+            m.assertEqual(merged.authorId, "UC_PLAYER", "the /player channel id stays authoritative")
+            m.assertEqual(merged.authorThumbnails[1].url, "https://example.com/avatar-176.jpg")
+        end function
+
+        @it("returns invalid when watch-next has no creator renderer")
+        function _()
+            m.assertInvalid(Innertube.ParseVideoOwnerMetadata({ contents: {} }))
+        end function
+
+    end class
+
+end namespace

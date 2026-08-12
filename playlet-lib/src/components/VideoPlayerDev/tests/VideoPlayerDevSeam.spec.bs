@@ -33,6 +33,54 @@ namespace Tests
             m.assertFalse(snap.seekSettling)
         end function
 
+        @it("the compact channel avatar opens the current video's channel from the button row")
+        function _()
+            m.top.callFunc("TestSetChannelInfo", "UC_CREATOR", "Example Creator", "https://example.com/avatar.jpg")
+
+            m.top.callFunc("TestKey", RemoteKeys.Down, true)
+            revealed = m.Snap()
+            m.assertTrue(revealed.chromeShown)
+            m.assertEqual(revealed.focusTarget, PlayerCoordinatorLogic.FocusTarget.Bar)
+            m.assertTrue(revealed.channelAvailable)
+            m.assertTrue(revealed.channelVisible)
+            m.assertFalse(revealed.channelFocused)
+            m.assertEqual(revealed.channelAuthor, "Example Creator")
+            m.assertEqual(revealed.channelThumbnail, "https://example.com/avatar.jpg")
+
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons, play/pause
+            m.top.callFunc("TestKey", RemoteKeys.Left, true) ' skips disabled Previous -> far-left Channel
+            focused = m.Snap()
+            m.assertEqual(focused.focusTarget, PlayerCoordinatorLogic.FocusTarget.Buttons)
+            m.assertEqual(focused.focusedButton, PlayerCoordinatorLogic.PlayerButton.Channel)
+            m.assertTrue(focused.channelFocused)
+            m.assertEqual(focused.focusedLabel, Tr(Locale.ContextMenu.OpenChannel) + ": Example Creator")
+
+            m.top.callFunc("TestKey", RemoteKeys.Down, true) ' buttons -> bar
+            m.assertEqual(m.Snap().focusTarget, PlayerCoordinatorLogic.FocusTarget.Bar)
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons, preserves Channel
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Channel)
+
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            opened = m.Snap()
+            m.assertEqual(opened.openedChannelId, "UC_CREATOR")
+            m.assertNotEqual(opened.control, VideoControl.Pause, "opening a channel does not pause playback")
+        end function
+
+        @it("hides and skips the channel action when channel metadata is unavailable")
+        function _()
+            m.top.callFunc("TestKey", RemoteKeys.Down, true)
+            snap = m.Snap()
+            m.assertTrue(snap.chromeShown)
+            m.assertEqual(snap.focusTarget, PlayerCoordinatorLogic.FocusTarget.Bar)
+            m.assertFalse(snap.channelAvailable)
+            m.assertFalse(snap.channelVisible)
+            m.assertFalse(snap.channelFocused)
+
+            m.top.callFunc("TestKey", RemoteKeys.Up, true)
+            m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Quality, "the hidden action is skipped")
+        end function
+
         ' P-SEAM: the coordinator must NOT pause the device while a play-through seek it issued is still settling.
         ' This is the wedge's root: the old code slammed control=pause on the in-flight seek -> buffering<->paused
         ' forever. It fails on the old code at the "rescrub while settling" step; passes on the new (deferred).
