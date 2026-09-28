@@ -60,7 +60,6 @@ function Initialize()
     m.seekToPercent = invalid
 
     m.errorDialogNode = invalid
-    m.statsForNerds = invalid
     m.qualitySelector = invalid
     m.speedSelector = invalid
     ' Per-video playback speed. Invalid means the configured default is effective; a player selector choice lives
@@ -105,6 +104,9 @@ function Initialize()
     m.largePause = m.top.findNode("largePause")
     m.buttonRow = m.top.findNode("buttonRow")
     m.fullScreenHint = m.top.findNode("fullScreenHint")
+    m.statsForNerds = m.top.findNode("statsForNerds")
+    m.statsForNerds.visible = false
+    m.statsForNerds.video = m.top
 
     m.autoHide = m.top.findNode("autoHide")
     m.transportTimer = m.top.findNode("transportTimer")
@@ -139,10 +141,6 @@ end function
 
 ' Called by AutoBind once the bound interface fields (container, jobQueue, services, ...) resolve.
 function OnNodeReady()
-
-    ' Create diagnostics before playback begins so transient decoder fields can be retained. The component
-    ' stays hidden until enabled, but keeps the focused branch's low-frequency stream cache warm.
-    EnsureStatsForNerds()
 
     ' Created here, not Init, because it needs AutoBind-resolved deps (jobQueue / preferences / notifications).
     m.sponsorblock = new SponsorBlockController.Controller({
@@ -184,6 +182,8 @@ function OnNodeReady()
     m.top.ObserveField("control", FuncName(OnControlChange))
     m.top.ObserveField("bufferingStatus", FuncName(OnBufferingStatus))
     m.top.ObserveField("playStartInfo", FuncName(OnPlayStartInfo))
+    ' the PiP grow animation drives translation; stats wait for it to settle at maxRect (SyncStatsForNerds).
+    m.top.ObserveField("translation", FuncName(SyncStatsForNerds))
     m.top.ObserveField("globalCaptionMode", FuncName(OnCaptionModeChange))
     m.top.ObserveField("playbackSpeed", FuncName(OnPlaybackSpeedChange))
     if m.videoQueue <> invalid
@@ -1100,8 +1100,8 @@ function ToggleBookmark() as void
 end function
 
 '===============================================================================
-' STATS FOR NERDS — persisted preference + passive fullscreen overlay. The overlay sits outside Chrome so
-' it remains visible when the HUD auto-hides, and owns its own fullscreen/observer gating.
+' STATS FOR NERDS — persisted preference + passive overlay. The overlay sits outside Chrome (under it) so it
+' remains visible when the HUD auto-hides; the coordinator owns its visibility (SyncStatsForNerds).
 '===============================================================================
 function SetupStatsForNerds() as void
     enabled = false
@@ -1122,48 +1122,24 @@ end function
 
 function SetStatsForNerdsEnabled(enabled as boolean) as void
     m.statsEnabled = enabled
-    EnsureStatsForNerds()
-    if m.statsForNerds <> invalid
-        m.statsForNerds.visible = enabled
-    end if
+    SyncStatsForNerds()
     if m.buttonRow <> invalid
         m.buttonRow.statsEnabled = enabled
     end if
 end function
 
-function EnsureStatsForNerds() as void
-    if m.statsForNerds <> invalid
-        m.statsForNerds.visible = m.statsEnabled
-        return
+' The overlay paints only while enabled and fullscreen at rest: minimizing hides it at once, and a PiP restore
+' holds it until the grow animation lands the player on maxRect (otherwise it would ride the shrunk player).
+function SyncStatsForNerds() as void
+    visible = false
+    if m.statsEnabled and m.container.fullscreen
+        maxRect = m.top.maxRect
+        translation = m.top.translation
+        visible = translation[0] = maxRect.x and translation[1] = maxRect.y
     end if
-
-    stats = CreateObject("roSGNode", "StatsForNerds")
-    if stats = invalid
-        LogError("Failed to create StatsForNerds")
-        m.statsEnabled = false
-        return
+    if m.statsForNerds.visible <> visible
+        m.statsForNerds.visible = visible
     end if
-    stats.visible = m.statsEnabled
-    stats.video = m.top
-    m.top.appendChild(stats)
-    m.statsForNerds = stats
-end function
-
-function RemoveStatsForNerds() as void
-    stats = m.statsForNerds
-    if stats = invalid
-        return
-    end if
-
-    stats.visible = false
-    if stats.hasField("dispose")
-        stats.dispose = true
-    end if
-    parent = stats.getParent()
-    if parent <> invalid
-        parent.removeChild(stats)
-    end if
-    m.statsForNerds = invalid
 end function
 
 '===============================================================================
@@ -1623,6 +1599,7 @@ function OnFullScreenChange() as void
     ' the fullScreenHint strip rides the shrink: show it ~1s after minimizing, auto-hide 5s later.
     m.showFullScreenHint = not fullscreen
     RefreshFullScreenHint()
+    SyncStatsForNerds()
 end function
 
 ' (re)arm the hint timer for the current phase: while minimized, 1s before showing (let the shrink finish),
@@ -2099,6 +2076,7 @@ function OnClose() as void
     m.top.unobserveField("control")
     m.top.unobserveField("bufferingStatus")
     m.top.unobserveField("playStartInfo")
+    m.top.unobserveField("translation")
     m.top.unobserveField("globalCaptionMode")
     m.top.unobserveField("playbackSpeed")
     m.top.unobserveField("close")
@@ -2155,7 +2133,7 @@ function OnClose() as void
         m.sponsorblock.Dispose()
         m.sponsorblock = invalid
     end if
-    RemoveStatsForNerds()
+    m.statsForNerds.dispose = true
     DismissErrorDialog()
 
     parent = m.top.getParent()

@@ -51,18 +51,18 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — keeps playing through th
     await expectField('#buttonRow.statsEnabled', true);
     await expectField('#StatsButton.active', true);
     await expectField('#StatsButton.toggleState', false);
-    await expectField('#statsBg.visible', true);
-    await expectField('#line1Value.text', 'playing');
-    await expectPred('#line2Value.text', (v) => typeof v === 'string' && v.includes(':'), 'shows a formatted position');
-    await expectPred('#line3Value.text', (v) => typeof v === 'string' && v.includes(':'), 'shows a formatted duration');
+    await expectField('#statsForNerds.visible', true);
+    await expectField('#videoIdValue.text', CONTENT_ID);
+    await expectField('#stateValue.text', 'playing');
+    await expectPred('#playbackValue.text', (v) => typeof v === 'string' && v.includes(' / '), 'shows position / duration');
     group('the overlay remains visible after the HUD auto-hides');
     await expectField('#Chrome.opacity', 0, 7000);
-    await expectField('#statsBg.visible', true);
-    await expectField('#line1Value.text', 'playing');
+    await expectField('#statsForNerds.visible', true);
+    await expectField('#stateValue.text', 'playing');
     // Roku firmware and stream selection do not expose every heavy field consistently; at least one should be
     // available on a real playback, but keep that device-dependent observation soft.
     await expectSoft(
-        '#line8Value.text',
+        '#containerValue.text',
         (v) => typeof v === 'string' && v.length > 0,
         'shows the inferred stream container',
         4000,
@@ -81,6 +81,7 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — keeps playing through th
     await expectField('#buttonRow.statsEnabled', false);
     await expectField('#StatsButton.active', false);
     await expectField('#StatsButton.toggleState', true);
+    await expectField('#statsForNerds.visible', false);
 
     if (initiallyEnabled) {
         group('restore the initially enabled preference');
