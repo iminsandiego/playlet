@@ -98,7 +98,7 @@ function TestSetup() as void
     ' nudge counter above — stacked observers fire a handler once per prior TestSetup on every write,
     ' and OnPosition's latency learning reads two identical fires as a CONFIRMED min-gap, poisoning
     ' LiveEdgeMs for any live test that runs after another test in the suite.
-    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control", "globalCaptionMode", "playbackSpeed"]
+    for each deviceField in ["state", "position", "duration", "close", "thumbnailTiles", "control", "globalCaptionMode", "playbackSpeed", "translation"]
         m.top.unobserveField(deviceField)
     end for
     m.top.globalCaptionMode = "Off"
@@ -342,8 +342,7 @@ function TestSnapshot() as object
         channelThumbnail: m.buttonRow.channelThumbnail
         openedChannelId: m.top.testOpenedChannelId
         statsEnabled: m.statsEnabled
-        statsOverlayPresent: m.statsForNerds <> invalid
-        statsOverlayVisible: m.statsForNerds <> invalid and m.statsForNerds.visible
+        statsOverlayVisible: m.statsForNerds.visible
         qualitySelectorPresent: m.qualitySelector <> invalid
         speedSelectorPresent: m.speedSelector <> invalid
         qualityPreference: m.top.preferences["playback.preferred_quality"]

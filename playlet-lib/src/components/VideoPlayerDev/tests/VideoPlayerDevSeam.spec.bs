@@ -436,8 +436,11 @@ namespace Tests
 
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar tier
             m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons tier
-            m.top.callFunc("TestKey", RemoteKeys.Right, true) ' highlight minimize
-            m.assertEqual(m.Snap().focusedButton, 1)
+            ' Right clamps at the row's end, and disabled buttons are skipped: enough presses always land on Minimize.
+            for i = 1 to PlayerCoordinatorLogic.PlayerButton.Minimize
+                m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            end for
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Minimize)
 
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
             after = m.Snap()
@@ -765,13 +768,11 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Right, true) ' -> Stats
             before = m.Snap()
             m.assertFalse(before.statsEnabled)
-            m.assertTrue(before.statsOverlayPresent, "hidden diagnostics are ready before transient decoder events")
             m.assertFalse(before.statsOverlayVisible)
 
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
             enabled = m.Snap()
             m.assertTrue(enabled.statsEnabled)
-            m.assertTrue(enabled.statsOverlayPresent)
             m.assertTrue(enabled.statsOverlayVisible)
             m.assertEqual(enabled.control, before.control, "Stats does not alter playback")
             m.assertEqual(enabled.focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
@@ -780,9 +781,37 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
             disabled = m.Snap()
             m.assertFalse(disabled.statsEnabled)
-            m.assertTrue(disabled.statsOverlayPresent, "disabling hides but retains the decoder cache")
             m.assertFalse(disabled.statsOverlayVisible)
             m.assertFalse(m.top.preferences["playback.stats_for_nerds"])
+        end function
+
+        @it("Stats hide in PiP and wait for the restore animation to settle before painting again")
+        function _()
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' reveal -> bar
+            m.top.callFunc("TestKey", RemoteKeys.Up, true) ' bar -> buttons, play/pause
+            for i = 1 to PlayerCoordinatorLogic.PlayerButton.Stats
+                if m.Snap().focusedButton = PlayerCoordinatorLogic.PlayerButton.Stats
+                    exit for
+                end if
+                m.top.callFunc("TestKey", RemoteKeys.Right, true)
+            end for
+            m.assertEqual(m.Snap().focusedButton, PlayerCoordinatorLogic.PlayerButton.Stats)
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertTrue(m.Snap().statsOverlayVisible, "enabled fullscreen")
+
+            m.top.container.fullscreen = false
+            minimized = m.Snap()
+            m.assertTrue(minimized.statsEnabled, "PiP does not change the preference")
+            m.assertFalse(minimized.statsOverlayVisible, "the diagnostics do not cover the PiP player")
+
+            ' The mock has no interpolated VideoPlayer node, so drive translation the way the minimize anim would.
+            m.top.translation = [834, 460]
+            m.top.container.fullscreen = true
+            m.assertFalse(m.Snap().statsOverlayVisible, "restore holds the overlay while the player is still shrunk")
+            m.top.translation = [417, 230]
+            m.assertFalse(m.Snap().statsOverlayVisible, "and while the grow animation is mid-flight")
+            m.top.translation = [0, 0]
+            m.assertTrue(m.Snap().statsOverlayVisible, "the settled fullscreen player restores the overlay")
         end function
 
         @it("Quality opens directly from its value button and restores that button focus")
