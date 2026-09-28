@@ -14,16 +14,18 @@ export { Key, ecp, odc };
 // Mirror the BrightScript enums the renderers project.
 export const Mode = { idle: 0, scrub: 1, scan: 2, liveDvr: 3 } as const;
 export const Glyph = { none: 0, replay: 9 } as const;
+// Mirrors PlayerCoordinatorLogic.PlayerButton.
 export const Button = {
-    previous: 0,
-    playPause: 1,
-    next: 2,
-    quality: 3,
-    speed: 4,
-    captions: 5,
-    stats: 6,
-    bookmark: 7,
-    minimize: 8,
+    channel: 0,
+    previous: 1,
+    playPause: 2,
+    next: 3,
+    quality: 4,
+    speed: 5,
+    captions: 6,
+    stats: 7,
+    bookmark: 8,
+    minimize: 9,
 } as const;
 
 const j = (v: unknown) => JSON.stringify(v);
