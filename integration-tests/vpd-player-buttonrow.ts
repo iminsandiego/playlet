@@ -4,7 +4,21 @@
 //
 //   cd references/playlet-legacy && npx tsx ./integration-tests/vpd-player-buttonrow.ts
 
-import { Key, Button, Mode, press, revealChrome, launchVod, finish, group, expectField, expectPred, expectMediaState, waitFor } from './vpd-player-harness';
+import {
+    Key,
+    Button,
+    Mode,
+    press,
+    field,
+    revealChrome,
+    launchVod,
+    finish,
+    group,
+    expectField,
+    expectPred,
+    expectMediaState,
+    waitFor,
+} from './vpd-player-harness';
 
 const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full control-row exercise
 
@@ -84,8 +98,23 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await expectField('#buttonRow.focusedIndex', Button.quality);
     await press(Key.Left);
     await expectField('#buttonRow.focusedIndex', Button.playPause);
+    // Left from play/pause skips the disabled Previous. The channel avatar is the leftmost button, focusable only
+    // when the video has channel info; without it the row's left edge is play/pause.
+    const channelAvailable = (await field<boolean>('#buttonRow.channelAvailable')) === true;
     await press(Key.Left);
-    await expectField('#buttonRow.focusedIndex', Button.playPause); // Previous is disabled, so this clamps
+    if (channelAvailable) {
+        await expectField('#buttonRow.focusedIndex', Button.channel);
+        await expectField('#ChannelButton.focused', true);
+        await expectField('#PlayPauseButton.focused', false);
+        await expectPred('#buttonRow.focusedLabel', (v) => typeof v === 'string' && v.length > 0, 'labels the channel action');
+        await press(Key.Left);
+        await expectField('#buttonRow.focusedIndex', Button.channel); // clamp, no wrap
+        // back to play/pause (skipping Previous again): Down/Up keeps the highlight, and OK on the avatar
+        // would open the channel instead of pausing.
+        await press(Key.Right);
+    }
+    await expectField('#buttonRow.focusedIndex', Button.playPause);
+    await expectField('#PlayPauseButton.focused', true);
 
     group('Down -> back to the trackbar (cursor grows); Up -> back to play/pause');
     await press(Key.Down); // buttons -> bar, or a no-op re-reveal onto the bar (same result either way)
@@ -121,13 +150,13 @@ const CONTENT_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny — long enough for the full
     await waitFor('#trickPlayBar.focused', (v) => v === true, 'trackbar focused on reveal');
     await press(Key.Up); // -> buttons tier, play/pause (doubled defensively, as above)
     await press(Key.Up);
-    await press(Key.Right); // -> Quality (skips disabled Next)
-    await press(Key.Right); // -> Speed
-    await press(Key.Right); // -> Captions
-    await press(Key.Right); // -> Stats
-    await press(Key.Right); // -> Bookmark
-    await press(Key.Right); // -> Minimize
+    await expectField('#buttonRow.rowFocused', true);
+    await expectField('#buttonRow.focusedIndex', Button.playPause);
+    // Minimize is the rightmost button and Right clamps there, so enough presses land on it whichever of
+    // Next/Bookmark are disabled (skipped) for this video.
+    for (let i = Button.playPause; i < Button.minimize; i++) await press(Key.Right);
     await expectField('#buttonRow.focusedIndex', Button.minimize);
+    await expectField('#MinimizeButton.focused', true);
     await press(Key.Ok); // activate -> PiP shrink (width 1280 -> 426, ~0.3s)
     await expectPred('#VideoPlayer.width', (w) => w > 0 && w < 1000, 'player shrank to the PiP window');
     await expectField('#Chrome.opacity', 0);
