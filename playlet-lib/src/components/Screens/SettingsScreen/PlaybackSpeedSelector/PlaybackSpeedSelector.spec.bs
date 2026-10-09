@@ -40,6 +40,29 @@ namespace Tests
             m.assertFalse(m.top.focus)
         end function
 
+        @it("saves the exact value for every displayed speed including fractional rates")
+        function _()
+            values = ["0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
+            labels = ["0.25x", "0.5x", "0.75x", "1x", "1.25x", "1.5x", "1.75x", "2x"]
+            options = []
+            for i = 0 to values.Count() - 1
+                options.Push({ displayText: labels[i], value: values[i] })
+            end for
+            m.top.options = options
+            speedList = m.top.findNode("speedList")
+            m.assertEqual(speedList.content.getChildCount(), 8)
+            for i = 0 to values.Count() - 1
+                m.top.save = false
+                m.top.closed = false
+                m.assertEqual(speedList.content.getChild(i).title, labels[i])
+                speedList.checkedItem = i
+                m.assertTrue(m.top.save, labels[i])
+                m.assertEqual(m.top.value, values[i])
+                m.top.callFunc("TestCompleteClose")
+                m.assertTrue(m.top.closed)
+            end for
+        end function
+
         @it("accepts a contextual title when embedded in the player")
         function _()
             m.top.title = "Speed for this video"

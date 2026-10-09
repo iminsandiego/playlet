@@ -56,6 +56,26 @@ Playback settings in the app.
 The integration suite asserts `#VideoPlayer` is a `VideoPlayerDev`, so it only passes when the lib is built
 with `#const USE_DEV_PLAYER = true`. Filter to a subset, e.g. `npm run test:integration:player -- transport live`.
 
+### Playback speed measurement (opt-in)
+
+`npm run test:integration:player -- speed` runs only when named (about six minutes). It selects all eight
+speeds through the real remote/menu path and measures ECP media-position progress against monotonic wall time
+over 24-second windows, so a wrong multiplier cannot pass on the requested `playbackSpeed` value alone. It also
+checks 2x → 1.25x, return to normal, and selecting 1.25x and 2x while paused. A ±0.06x tolerance separates
+neighboring 0.25x settings; buffering, seeks, sampling gaps or slow ECP responses invalidate a window instead of
+counting as a pass. It requires an already installed full dev app with ODC, never deploys, and never writes
+saved preferences. `npx tsx --test integration-tests/playback-rate.test.ts` checks the rate oracle locally.
+
+Known result (Roku Ultra, Oct 2026): every multiplier measured within 0.01x of the selection, but switching
+into or out of 2x (and once a paused change) intermittently froze playback for several seconds; the test
+fails those transitions. Waiting for the native paused state before applying the rate did not remove them.
+
+Environment: `PLAYLET_SPEED_SEQUENCE=2,1.25` for a targeted rerun, `PLAYLET_SPEED_VIDEO_ID` and
+`PLAYLET_SPEED_START_SECONDS` for a continuous section without SponsorBlock skips, `PLAYLET_SPEED_PAUSED=0` to
+skip the paused cases. `PLAYLET_SPEED_AUDIO_CODEC=aac|ac3|eac3`, `PLAYLET_SPEED_AUDIO_TRACK` and
+`PLAYLET_SPEED_AUDIO_BITRATE` are diagnostic-only: they restart this video with a temporary audio constraint
+and never change saved audio preferences.
+
 ## State coverage (keeping contradictory states impossible)
 
 The player is kept regression-proof by a two-tier invariant net. Each invariant is a predicate that must ALWAYS
