@@ -81,9 +81,9 @@ function Initialize()
     m.armedTimerId = TransportController.Timer.None ' which module timer the single transportTimer holds
     m.lastCommitSeq = 0
     m.lastFinishSeq = 0
-    ' a keep-playing seek was issued while the device was PAUSED. The device auto-resumes on any seek
-    ' (autoplayAfterSeek only governs resume-after-REBUFFER per the Video docs), so the paused state is preserved
-    ' by re-pausing on the next playing edge.
+    ' a keep-playing seek (SponsorBlock skip / InstantReplay / setSeek) was issued while the device was PAUSED. The
+    ' device auto-resumes on any seek (autoplayAfterSeek only governs resume-after-REBUFFER per the Video docs), so
+    ' the paused state is preserved by re-pausing after stable target confirmation (CompleteDeferredRepause).
     m.repauseAfterSeek = false
     ' live edge clock anchor: the manifest's availabilityStartTime (Playlet generates it), as epoch seconds.
     ' The edge is then wallClock - anchor — continuous through pauses/rebuffers/startup. The fallback pair

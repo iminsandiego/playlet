@@ -333,6 +333,12 @@ namespace Tests
 
                 ' the device lands and (on any seek) plays.
                 m.top.callFunc("TestSetState", VideoState.Playing)
+                if ArrayUtils.IndexOfString(paused, state) <> -1
+                    ' the re-pause waits for stable target confirmation, not the first transient playing edge.
+                    m.assertNotEqual(m.Snap().control, VideoControl.Pause, "not re-paused on the first playing edge" + where)
+                    m.top.position = targetS
+                    m.top.position = targetS + 0.5
+                end if
                 landed = m.Snap()
                 m.assertEqual(landed.transportMode, TransportController.Mode.Idle, "still idle on landing" + where)
                 if ArrayUtils.IndexOfString(paused, state) <> -1

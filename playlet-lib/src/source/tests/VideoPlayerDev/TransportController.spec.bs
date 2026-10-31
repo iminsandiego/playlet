@@ -1273,7 +1273,7 @@ namespace Tests
         function _()
             m.t.ForceIdleSeek(150000, true)
             m.t.HandleCommand(TransportController.Command.Left)
-            m.assertEqual(m.t.cursorMs, 148000)
+            m.assertEqual(m.t.cursorMs, 140000) ' one fixed 10s scrub step back from the target
             m.t.ForceIdleSeek(150000, true)
             m.t.HandleCommand(TransportController.Command.Fwd)
             m.t.Tick(TransportController.Timer.Scan)
@@ -1290,7 +1290,7 @@ namespace Tests
             t.ForceIdleSeek(270000, true)
             t.HandleCommand(TransportController.Command.Left)
             m.assertEqual(t.transportMode, TransportController.Mode.LiveDvr)
-            m.assertEqual(t.cursorMs, 265000)
+            m.assertEqual(t.cursorMs, 260000) ' one 10s live DVR step back from the target
             t.ForceIdleSeek(270000, true)
             t.TakeVideoIntent()
             t.HandleCommand(TransportController.Command.Replay)
