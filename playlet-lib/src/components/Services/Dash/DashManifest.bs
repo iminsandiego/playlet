@@ -610,8 +610,22 @@ class DashManifest
         return host.EndsWith(".googlevideo.com")
     end function
 
+    ' Query identifying a source stream to the speed-audio helper (segments and /probe).
+    function SpeedAudioQuery(stream as object, videoId as string) as string
+        return `v=${videoId.EncodeUriComponent()}&itag=${stream.itag}&src=${ValidString(stream.url).EncodeUriComponent()}`
+    end function
+
+    ' The stream FindSpeedAudioSource would pick for this VOD metadata, or invalid.
+    function SpeedAudioSourceFor(metadata as object) as dynamic
+        if not IsArray(metadata.adaptiveFormats)
+            return invalid
+        end if
+        groupings = m.CreateFormatGroupings(metadata.adaptiveFormats, ValidBool(metadata.isPostLiveDvr), false)
+        return m.FindSpeedAudioSource(groupings.audio)
+    end function
+
     function GenerateSpeedAudioAdaptationSet(xml as object, stream as object, id as integer, metadata as object) as integer
-        query = `v=${ValidString(metadata.videoId).EncodeUriComponent()}&itag=${stream.itag}&src=${ValidString(stream.url).EncodeUriComponent()}`
+        query = m.SpeedAudioQuery(stream, ValidString(metadata.videoId))
         base = m.speedAudioHelperUrl
         if base.EndsWith("/")
             base = base.Left(base.Len() - 1)
@@ -634,10 +648,12 @@ class DashManifest
                 "schemeIdUri": "urn:mpeg:dash:23003:3:audio_channel_configuration:2011"
                 "value": "1"
             })
-            if xml.Node("Representation", { "id": "speed-audio-mono", "bandwidth": "96000" })
+            if xml.Node("Representation", { "id": "speed-audio-mono", "bandwidth": "128000" })
+                ' 172 AAC frames (3.9938 s) per segment, exactly as the helper cuts them: a rounder 4 s grid
+                ' leaves each join up to a frame off, which Roku resolves by trimming - an audible click.
                 xml.EmptyNode("SegmentTemplate", {
-                    "timescale": "1000"
-                    "duration": "4000"
+                    "timescale": "44100"
+                    "duration": "176128"
                     "startNumber": "1"
                     "initialization": `${base}/a/init.mp4?${query}`
                     "media": `${base}/a/$Number$.m4s?${query}`

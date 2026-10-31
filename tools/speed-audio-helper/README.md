@@ -19,6 +19,10 @@ video's AAC track to mono AAC and serves it to Playlet as DASH segments.
 - **Only away from 1x.** At 1x, Playlet plays the video's normal stereo audio. Choosing another speed
   mid-video reloads the stream at the current position, which takes about one second. A video that starts at
   a non-1x default speed uses the helper from the start.
+- **Skips mono sources.** Before using the helper, Playlet asks it (`/probe`, about 0.3 s, cached per video)
+  whether the video's left and right channels are effectively identical. This is true of most talking-head
+  uploads. Roku keeps identical channels centred, so those videos keep their own audio, and later speed
+  changes in them don't reload.
 - **Falls back.** If the helper doesn't answer its health check within 1.5 s, Playlet uses the video's own
   audio, as it would without a helper. Live streams, DRM-protected audio and Invidious-proxied streams always
   use the video's own audio.
@@ -48,13 +52,13 @@ loginctl enable-linger "$USER"   # keep it running after logout
 | `PLAYLET_SPEED_AUDIO_PORT` | `8098` | Listening port |
 | `PLAYLET_SPEED_AUDIO_CACHE` | `~/.cache/playlet-speed-audio` | Transcoded segments; cleared at start |
 | `PLAYLET_SPEED_AUDIO_CACHE_ENTRIES` | `12` | Videos kept; least recently used are evicted |
-| `PLAYLET_SPEED_AUDIO_BITRATE` | `96k` | Mono AAC bitrate |
+| `PLAYLET_SPEED_AUDIO_BITRATE` | `128k` | Mono AAC bitrate |
 
 ## How it works
 
 On the first request for a video, the helper downloads the YouTube AAC stream in 2 MB range requests.
 googlevideo throttles a single long request to about 2x realtime but not short ranges. It pipes the stream
-into one ffmpeg, which writes 4-second mono segments, at roughly 80-200x realtime.
+into one ffmpeg, which writes mono segments of exactly 172 AAC frames (3.99 s), at roughly 80-200x realtime.
 
 A request far beyond the transcode front (a seek) starts a second transcode from the matching `sidx`
 fragment. Its segment timestamps are rewritten to the real position when served.

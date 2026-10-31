@@ -6,7 +6,8 @@ smears between the ears. Mono input comes out identical in both ears. Playlet ca
 so when a helper is configured it points the audio AdaptationSet of its DASH manifest here.
 
 Endpoints
-  GET /health                         -> {"service": "playlet-speed-audio", "version": 1}
+  GET /health                         -> {"service": "playlet-speed-audio", "version": N}
+  GET /probe?v=ID&itag=N&src=URL      -> {"mono": bool, "side_db": float}: is the source effectively mono?
   GET /a/init.mp4?v=ID&itag=N&src=URL -> fMP4 init segment (mono AAC)
   GET /a/{n}.m4s?v=ID&itag=N&src=URL  -> media segment n (1-based), SEGMENT_SECONDS long
 
@@ -18,18 +19,28 @@ Requires python3 (stdlib only) and ffmpeg. Configure with environment variables:
   PLAYLET_SPEED_AUDIO_PORT (8098), PLAYLET_SPEED_AUDIO_CACHE (~/.cache/playlet-speed-audio),
   PLAYLET_SPEED_AUDIO_CACHE_ENTRIES (12), PLAYLET_SPEED_AUDIO_BITRATE (96k).
 """
-import hashlib, json, os, re, shutil, struct, subprocess, threading, time, urllib.error, urllib.parse, urllib.request
+import array, hashlib, json, math, os, re, shutil, struct, subprocess, threading, time, urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = 1
+VERSION = 2
 PORT = int(os.environ.get("PLAYLET_SPEED_AUDIO_PORT", "8098"))
 CACHE = os.path.expanduser(os.environ.get("PLAYLET_SPEED_AUDIO_CACHE", "~/.cache/playlet-speed-audio"))
 MAX_ENTRIES = int(os.environ.get("PLAYLET_SPEED_AUDIO_CACHE_ENTRIES", "12"))
-BITRATE = os.environ.get("PLAYLET_SPEED_AUDIO_BITRATE", "96k")
-SEGMENT_SECONDS = 4
+BITRATE = os.environ.get("PLAYLET_SPEED_AUDIO_BITRATE", "128k")
 SAMPLE_RATE = 44100        # output timescale; ffmpeg's AAC keeps the source rate (YouTube AAC is 44.1 kHz)
+# Segments are a whole number of AAC frames (172 x 1024 samples = 3.9938 s), matching the manifest's
+# SegmentTemplate duration exactly. With 4.000 s the joins drift up to a frame off the advertised grid and
+# Roku's player trims/overlaps there, which is audible as clicks.
+SEGMENT_SAMPLES = 172 * 1024
+SEGMENT_SECONDS = SEGMENT_SAMPLES / SAMPLE_RATE
+# ffmpeg counts frames from the encoder's priming frame (pts -1024 samples) and cuts at the first frame whose
+# offset from it reaches k * seg_duration. A hair over the exact length makes it cut at frame 172k+1, so
+# segment 1 holds priming + 172 frames and every later segment starts exactly at (k-1) * 176128 samples, on
+# the manifest grid (valid for ~11000 segments, 12 hours).
+SEG_DURATION_ARG = f"{SEGMENT_SECONDS + 0.000002:.6f}"
 WAIT_SECONDS = 45          # longest a segment request waits for the transcode
 SEEK_AHEAD_SEGMENTS = 20   # a request this far past the transcode front starts a transcode from there
+MONO_SIDE_DB = -30.0       # L-R energy this far below L+R in every probed stretch counts as mono
 ALLOWED_HOST = re.compile(r"(^|\.)googlevideo\.com$")
 
 _lock = threading.Lock()
@@ -129,8 +140,8 @@ class Run:
             if start > 0:
                 cmd += ["-ss", str(start)]
             cmd += ["-i", job.src]
-        cmd += ["-vn", "-map", "0:a:0", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "aac", "-b:a", BITRATE,
-                "-f", "dash", "-seg_duration", str(SEGMENT_SECONDS), "-use_template", "1", "-use_timeline", "0",
+        cmd += ["-vn", "-map", "0:a:0", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "aac", "-aac_coder", "twoloop", "-b:a", BITRATE,
+                "-f", "dash", "-seg_duration", SEG_DURATION_ARG, "-use_template", "1", "-use_timeline", "0",
                 "-init_seg_name", "init.mp4", "-media_seg_name", "seg-$Number$.m4s",
                 "-dash_segment_type", "mp4", os.path.join(self.dir, "out.mpd")]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if self.feed else subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -198,6 +209,8 @@ class Job:
         self.head = None   # first bytes of the source (init + sidx)
         self.total = None  # source length
         self._index = False
+        self._probe = None
+        self._probe_lock = threading.Lock()
         os.makedirs(self.dir, exist_ok=True)
 
     def index(self):
@@ -232,6 +245,46 @@ class Job:
         r = self.run_for(1)
         p = os.path.join(r.dir, "init.mp4")
         return p, r
+
+    def probe(self):
+        """Whether the source is effectively mono (L and R identical within MONO_SIDE_DB in every sampled
+        stretch). Roku's stretcher keeps identical channels identical, so such videos don't need the helper."""
+        with self._probe_lock:
+            if self._probe is not None:
+                return self._probe
+            index = self.index()
+            if index is None:
+                self._probe = {"mono": False, "reason": "no index"}
+                return self._probe
+            init_end, frags = index
+
+            def side_db(frac):
+                i = min(len(frags) - 2, int(len(frags) * frac))
+                if i < 0:
+                    return None
+                start, end = frags[i][0], frags[i + 1][0] - 1
+                data, _ = fetch_range(self.src, start, min(end, start + 400000))
+                pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-ac", "2", "-ar", "8000", "-f", "s16le", "-"],
+                                     input=self.head[:init_end] + data, capture_output=True).stdout
+                a = array.array("h", pcm[: len(pcm) // 4 * 4])
+                mid = side = 0.0
+                for k in range(0, len(a) - 1, 2):
+                    l, r = a[k], a[k + 1]
+                    mid += (l + r) * (l + r); side += (l - r) * (l - r)
+                return 10 * math.log10(side / mid + 1e-20) if mid > 1e6 else None
+
+            results = [None] * 3
+            threads = [threading.Thread(target=lambda j, f: results.__setitem__(j, side_db(f)), args=(j, f))
+                       for j, f in enumerate((0.15, 0.5, 0.85))]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            measured = [v for v in results if v is not None]
+            worst = max(measured) if measured else 0.0  # nothing measurable: treat as stereo
+            self._probe = {"mono": worst < MONO_SIDE_DB, "side_db": round(worst, 1)}
+            log("probe", self.key[:10], self._probe)
+            return self._probe
 
     def stop(self):
         for r in self.runs:
@@ -335,6 +388,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/health":
                 return self.send(200, json.dumps({"service": "playlet-speed-audio", "version": VERSION}).encode(), "application/json")
+            if u.path == "/probe":
+                return self.send(200, json.dumps(get_job(params).probe()).encode(), "application/json")
             if u.path == "/a/init.mp4":
                 job = get_job(params)
                 p, r = job.init_path()
@@ -355,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
                     log(f"segment {n} waited {waited:.1f}s")
                 data = open(r.path(n), "rb").read()
                 if r.first > 1:  # seek run: move its 0-based timeline to the segment's real position
-                    data = shift_decode_time(data, (r.first - 1) * SEGMENT_SECONDS * SAMPLE_RATE)
+                    data = shift_decode_time(data, (r.first - 1) * SEGMENT_SAMPLES)
                 return self.send(200, data, "audio/mp4")
             return self.send(404, b"not found")
         except ValueError as e:

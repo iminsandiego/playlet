@@ -285,7 +285,8 @@ namespace Tests
             src = "https://rr1.googlevideo.com/videoplayback?itag=140".EncodeUriComponent()
             m.assertEqual(r.helper@initialization, `http://helper.lan:8098/a/init.mp4?v=abc&itag=140&src=${src}`)
             m.assertEqual(r.helper@media, `http://helper.lan:8098/a/$Number$.m4s?v=abc&itag=140&src=${src}`)
-            m.assertEqual(r.helper@duration, "4000")
+            m.assertEqual(r.helper@duration, "176128")
+            m.assertEqual(r.helper@timescale, "44100")
         end function
 
         @it("keeps the stream's own audio when no helper is set")

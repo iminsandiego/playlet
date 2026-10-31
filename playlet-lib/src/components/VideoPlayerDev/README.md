@@ -65,7 +65,7 @@ Roku's pitch-preserving stretcher processes the left and right channels independ
 between the ears at 1.25x/1.5x. Mono stays centred. With the optional speed-audio helper configured
 (`playback.speed_audio_helper`, see `tools/speed-audio-helper`), VOD DASH streams use the helper's mono track
 at speeds other than 1x. `ReloadForSpeedAudio` swaps the stream url's `speedAudio=mono` flag and replays from
-the current position when a speed change crosses 1x. Without a helper, or if it doesn't answer, playback uses
+the current position when a speed change crosses 1x. The dash router first probes the source; effectively mono videos (most talking-head uploads) keep their own audio, since Roku leaves identical channels centred, and their speed changes don't reload. Without a helper, or if it doesn't answer, playback uses
 the stream's own audio.
 
 ### Playback speed measurement (opt-in)

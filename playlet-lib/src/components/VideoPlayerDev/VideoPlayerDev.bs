@@ -5,6 +5,7 @@ import "pkg:/components/JobSystem/Jobs.bs"
 import "pkg:/components/JobSystem/JobSystem.bs"
 import "pkg:/components/Services/Innertube/Constants.bs"
 import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
+import "pkg:/components/Telemetry/VideoLoadHandoff.bs"
 import "pkg:/components/VideoPlayer/Lounge.bs"
 import "pkg:/components/VideoPlayerDev/ErrorDialogController.bs"
 import "pkg:/components/VideoPlayerDev/PlaybackTelemetry.bs"
@@ -1029,6 +1030,11 @@ function ReloadForSpeedAudio(speed as float) as boolean
     end if
     url = ValidString(content.url)
     if url.InStr("/api/dash?") = -1 or url.InStr("videoLoadId=") = -1
+        return false
+    end if
+    ' the dash router found the source effectively mono: Roku keeps it centred, no helper and no reload needed
+    probed = VideoLoadHandoff.Read("cachefs:/speed_audio_source.json", ValidString(content.videoLoadId))
+    if IsAssociativeArray(probed) and probed.stereo = false
         return false
     end if
     wantMono = Abs(speed - 1.0) > 0.001

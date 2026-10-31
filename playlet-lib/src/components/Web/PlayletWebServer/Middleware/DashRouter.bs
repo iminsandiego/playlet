@@ -11,6 +11,8 @@ import "pkg:/source/utils/MathUtils.bs"
 import "pkg:/source/utils/StringUtils.bs"
 import "pkg:/source/utils/Types.bs"
 
+' Per-load handoff to the player: is this video's audio stereo (does a speed change need the helper)?
+const SPEED_AUDIO_SOURCE_PATH = "cachefs:/speed_audio_source.json"
 ' Manifest requests closer together than this (Roku re-fetching after an error) share one live head check.
 const LIVE_HEAD_MIN_INTERVAL_MS = 500
 ' Head time leaping this far past the listed timeline within one head check is a stall.
@@ -59,6 +61,7 @@ namespace Http
             m.liveManifestTemplateKey = invalid
             m.reportedLiveHeadFailure = false
             m.speedAudioHealth = {} ' helper base url -> { ok, timer }
+            m.speedAudioProbe = {} ' video load id -> true when the source is stereo (helper needed)
         end function
 
         ' Returns the metadata of video load `videoLoadId`, or invalid when the player holds
@@ -109,8 +112,11 @@ namespace Http
             m.dashManifest.invidiousInstance = m.invidiousService.GetInstance()
             m.dashManifest.disableAutoDubbed = ValidBool(m.preferencesNode["playback.disable_auto_dubbed"])
             m.dashManifest.speedAudioHelperUrl = ""
-            if ValidString(request.query.speedAudio) = "mono"
-                m.dashManifest.speedAudioHelperUrl = m.GetSpeedAudioHelper()
+            if ValidString(request.query.speedAudio) = "mono" and not ValidBool(metadata.liveNow)
+                m.dashManifest.speedAudioHelperUrl = m.GetSpeedAudioHelper() ' the source pick needs it set
+                if m.dashManifest.speedAudioHelperUrl <> "" and not m.IsSpeedAudioSourceStereo(m.dashManifest.speedAudioHelperUrl, metadata, videoLoadId)
+                    m.dashManifest.speedAudioHelperUrl = ""
+                end if
             end if
             isLocal = ValidString(local) = "true"
 
@@ -160,6 +166,34 @@ namespace Http
                 return base
             end if
             return ""
+        end function
+
+        ' Asks the helper whether the video's audio is effectively mono. Roku's stretcher keeps identical channels
+        ' identical, so a mono source (most talking-head uploads) plays its own audio - no re-encode, and the
+        ' answer is handed to the player so later speed changes skip the reload. Unknown counts as stereo.
+        function IsSpeedAudioSourceStereo(helper as string, metadata as object, videoLoadId as string) as boolean
+            cached = m.speedAudioProbe[videoLoadId]
+            if cached <> invalid
+                return cached
+            end if
+            source = m.dashManifest.SpeedAudioSourceFor(metadata)
+            if source = invalid
+                return true ' the manifest falls back to the stream's own audio by itself
+            end if
+            stereo = true
+            response = HttpClient.Get(`${helper}/probe?${m.dashManifest.SpeedAudioQuery(source, ValidString(metadata.videoId))}`).NoCache().AttemptTimeoutMs(2500).RetryCount(0).Await()
+            if response.IsSuccess()
+                json = response.Json()
+                if IsAssociativeArray(json) and json.mono = true
+                    stereo = false
+                end if
+            end if
+            m.speedAudioProbe[videoLoadId] = stereo
+            ' handed to the player through a file: writing to the Video's content node while it loads makes the
+            ' player treat it as new content and drop this manifest request.
+            VideoLoadHandoff.Write(SPEED_AUDIO_SOURCE_PATH, videoLoadId, { "stereo": stereo })
+            LogInfo("Speed audio source for", metadata.videoId, "stereo:", stereo)
+            return stereo
         end function
 
         function ReportManifestErrors(xmlContent as string, videoLoadId as string) as void
