@@ -999,6 +999,11 @@ function ApplyPlaybackSpeed(value as string) as void
         return
     end if
 
+    if ReloadForSpeedAudio(speed)
+        Lounge.SendPlaybackSpeedChanged(speed, not m.transport.isLive)
+        return
+    end if
+
     wasPlaying = (m.top.state = VideoState.Playing)
     if wasPlaying
         m.top.control = VideoControl.Pause
@@ -1008,6 +1013,67 @@ function ApplyPlaybackSpeed(value as string) as void
         m.top.control = VideoControl.Resume
     end if
     Lounge.SendPlaybackSpeedChanged(speed, not m.transport.isLive)
+end function
+
+' With a speed-audio helper configured, a VOD DASH stream carries the helper's mono track at speeds other than
+' 1x (Roku's stretcher smears stereo between the ears) and the video's own audio at 1x. Crossing that line
+' mid-video swaps the stream url's speedAudio flag and replays from the current position at the new speed -
+' the error-retry replay path. Returns false (the caller applies the speed in place) when no swap is needed.
+function ReloadForSpeedAudio(speed as float) as boolean
+    content = m.top.content
+    if content = invalid or m.transport.isLive or m.top.preferences = invalid
+        return false
+    end if
+    if StringUtils.IsNullOrEmpty(ValidString(m.top.preferences["playback.speed_audio_helper"]).Trim())
+        return false
+    end if
+    url = ValidString(content.url)
+    if url.InStr("/api/dash?") = -1 or url.InStr("videoLoadId=") = -1
+        return false
+    end if
+    wantMono = Abs(speed - 1.0) > 0.001
+    if (url.InStr("speedAudio=mono") <> -1) = wantMono
+        return false
+    end if
+    state = m.top.state
+    if state <> VideoState.Playing and state <> VideoState.Paused and state <> VideoState.Buffering
+        return false
+    end if
+
+    positionMs = Int(m.top.position * 1000) ' a Double: ValidFloat would read it as 0
+    urls = content.playletStreamUrls
+    if IsArray(urls)
+        updated = []
+        for each u in urls
+            updated.Push(SetSpeedAudioParam(ValidString(u), wantMono))
+        end for
+        content.playletStreamUrls = updated
+    end if
+    content.url = SetSpeedAudioParam(url, wantMono)
+    LogInfo("speed audio: reloading with", "mono", wantMono, "at", positionMs, "ms, speed", speed)
+
+    if m.transport.transportMode <> TransportController.Mode.Idle
+        m.transport.ResetTransport()
+        ApplyTransport()
+    end if
+    ' Unlike the error retry, replaying a playing stream emits no "finished" edge (measured: playing ->
+    ' buffering -> playing), so ignoreNextFinished stays untouched.
+    m.repauseAfterSeek = false
+    m.top.playbackSpeed = speed ' set before play: a rate assigned before playback starts takes effect
+    ApplySeek(positionMs)
+    m.top.control = VideoControl.Play
+    return true
+end function
+
+function SetSpeedAudioParam(url as string, mono as boolean) as string
+    url = url.Replace("&speedAudio=mono", "").Replace("?speedAudio=mono&", "?").Replace("?speedAudio=mono", "")
+    if mono
+        if url.InStr("?") = -1
+            return url + "?speedAudio=mono"
+        end if
+        return url + "&speedAudio=mono"
+    end if
+    return url
 end function
 
 function OnPlaybackSpeedChange(_event = invalid as dynamic) as void

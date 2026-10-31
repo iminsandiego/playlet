@@ -303,7 +303,7 @@ function CreateStreamUrls(source as string, metadata as object, videoLoadId as s
         })
         streamUrls.push(dashUrl)
     else if source = StreamSource.AdaptiveFormats
-        AddDashUrls(streamUrls, metadata, videoLoadId, preferredQuality, backend, proxyVideos, playletServerPort)
+        AddDashUrls(streamUrls, metadata, videoLoadId, preferredQuality, backend, proxyVideos, playletServerPort, WantsSpeedAudio(preferences))
     else if source = StreamSource.FormatStreams
         for each stream in metadata.formatStreams
             if StringUtils.IsNullOrEmpty(stream.url)
@@ -396,13 +396,27 @@ function AddHlsUrls(streamUrls as object, metadata as object, preferredQuality a
     AddUrls(streamUrls, hlsUrl, hlsUrlLocal, hlsUrlFiltered, hlsUrlFilteredLocal, proxyVideos)
 end function
 
-function AddDashUrls(streamUrls as object, metadata as object, videoLoadId as string, preferredQuality as string, backend as string, proxyVideos as string, playletServerPort as integer) as void
+' A video that starts at a non-1x default speed asks for the speed-audio helper's mono track up front (the
+' dash router falls back to the stream's audio when no helper answers), so it needn't reload once playing.
+function WantsSpeedAudio(preferences as object) as boolean
+    if StringUtils.IsNullOrEmpty(ValidString(preferences["playback.speed_audio_helper"]).Trim())
+        return false
+    end if
+    speed = Val(ValidString(preferences["playback.preferred_speed"]))
+    return speed > 0 and Abs(speed - 1.0) > 0.001
+end function
+
+function AddDashUrls(streamUrls as object, metadata as object, videoLoadId as string, preferredQuality as string, backend as string, proxyVideos as string, playletServerPort as integer, speedAudio = false as boolean) as void
     ' Redirect to Playet's local web server, where will will be
     ' dynamically generating the DASH manifest, and filter quality
-    dashUrl = UrlUtils.AppendQueryParams(`http://127.0.0.1:${playletServerPort}/api/dash`, {
+    dashParams = {
         v: metadata.videoId
         "videoLoadId": videoLoadId
-    })
+    }
+    if speedAudio
+        dashParams["speedAudio"] = "mono"
+    end if
+    dashUrl = UrlUtils.AppendQueryParams(`http://127.0.0.1:${playletServerPort}/api/dash`, dashParams)
 
     dashUrlLocal = invalid
     dashUrlFiltered = invalid

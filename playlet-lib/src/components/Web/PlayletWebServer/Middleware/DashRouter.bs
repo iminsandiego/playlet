@@ -58,6 +58,7 @@ namespace Http
             m.liveManifestTemplate = ""
             m.liveManifestTemplateKey = invalid
             m.reportedLiveHeadFailure = false
+            m.speedAudioHealth = {} ' helper base url -> { ok, timer }
         end function
 
         ' Returns the metadata of video load `videoLoadId`, or invalid when the player holds
@@ -107,6 +108,10 @@ namespace Http
 
             m.dashManifest.invidiousInstance = m.invidiousService.GetInstance()
             m.dashManifest.disableAutoDubbed = ValidBool(m.preferencesNode["playback.disable_auto_dubbed"])
+            m.dashManifest.speedAudioHelperUrl = ""
+            if ValidString(request.query.speedAudio) = "mono"
+                m.dashManifest.speedAudioHelperUrl = m.GetSpeedAudioHelper()
+            end if
             isLocal = ValidString(local) = "true"
 
             if ValidBool(metadata.liveNow)
@@ -121,6 +126,40 @@ namespace Http
             response.SetBodyDataString(xmlContent)
             response.ContentType("application/dash+xml")
             return true
+        end function
+
+        ' The configured speed-audio helper's base url if it answers its health check, else "". A failed
+        ' check falls back to YouTube's own audio; results are cached briefly so a reload doesn't re-check.
+        function GetSpeedAudioHelper() as string
+            base = ValidString(m.preferencesNode["playback.speed_audio_helper"]).Trim()
+            if base = "" or not (base.StartsWith("http://") or base.StartsWith("https://"))
+                return ""
+            end if
+            if base.EndsWith("/")
+                base = base.Left(base.Len() - 1)
+            end if
+            cached = m.speedAudioHealth[base]
+            if cached <> invalid and cached.timer.TotalSeconds() < 30
+                if cached.ok
+                    return base
+                end if
+                return ""
+            end if
+            response = HttpClient.Get(`${base}/health`).NoCache().AttemptTimeoutMs(1500).RetryCount(0).Await()
+            ok = false
+            if response.IsSuccess()
+                json = response.Json()
+                ok = IsAssociativeArray(json) and json.service = "playlet-speed-audio"
+            end if
+            if not ok
+                LogWarnNoTelemetry("Speed audio helper unavailable, using the stream's own audio:", base)
+            end if
+            timer = CreateObject("roTimespan")
+            m.speedAudioHealth[base] = { ok: ok, timer: timer }
+            if ok
+                return base
+            end if
+            return ""
         end function
 
         function ReportManifestErrors(xmlContent as string, videoLoadId as string) as void

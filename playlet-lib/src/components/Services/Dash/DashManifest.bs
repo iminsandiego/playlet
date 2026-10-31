@@ -19,11 +19,16 @@ class DashManifest
 
     public invidiousInstance as dynamic
     public disableAutoDubbed as boolean
+    ' Base URL of a reachable speed-audio helper (tools/speed-audio-helper), or "". When set, VOD manifests carry
+    ' one mono AAC track from the helper instead of YouTube's audio: Roku's playbackSpeed stretcher processes
+    ' each stereo channel independently, which smears sound between the ears at 1.25x/1.5x; mono doesn't.
+    public speedAudioHelperUrl as string
     private canDecodeAv1Cache as dynamic
 
     function new(invidiousInstance as string, disableAutoDubbed = false as boolean)
         m.invidiousInstance = invidiousInstance
         m.disableAutoDubbed = disableAutoDubbed
+        m.speedAudioHelperUrl = ""
 
         m.utils = new Http.Utils()
 
@@ -131,7 +136,15 @@ class DashManifest
             if xml.Node("Period", periodAttributes)
 
                 id = 0
-                id = m.GenerateAudioAdaptationSets(xml, audioGroups, id, metadata)
+                helperSet = invalid
+                if not isLive
+                    helperSet = m.FindSpeedAudioSource(audioGroups)
+                end if
+                if helperSet <> invalid
+                    id = m.GenerateSpeedAudioAdaptationSet(xml, helperSet, id, metadata)
+                else
+                    id = m.GenerateAudioAdaptationSets(xml, audioGroups, id, metadata)
+                end if
                 id = m.GenerateVideoAdaptationSets(xml, filteredVideoGroups, id, metadata)
                 m.GenerateImageAdaptationSets(xml, storyboards, id)
 
@@ -549,6 +562,91 @@ class DashManifest
             id += 1
         end for
         return id
+    end function
+
+    ' The AAC stream the speed-audio helper should downmix: the original-language (or only) track, without
+    ' stable-volume / voice-boost processing, highest bitrate. Invalid when no helper is set or no direct
+    ' googlevideo AAC stream exists (e.g. proxied through Invidious) - the caller then uses YouTube's audio.
+    function FindSpeedAudioSource(audioGroups as object) as dynamic
+        if StringUtils.IsNullOrEmpty(m.speedAudioHelperUrl)
+            return invalid
+        end if
+        best = invalid
+        bestScore = -1
+        for each group in audioGroups
+            for each stream in group
+                if ValidString(stream.type).InStr("mp4a.40.2") = -1 or StringUtils.IsNullOrEmpty(stream.url)
+                    continue for
+                end if
+                if stream.isDrc = true or stream.isVoiceBoost = true or stream.isDubbed = true or stream.isAutoDubbed = true or stream.isDescriptive = true or stream.isSecondary = true
+                    continue for
+                end if
+                if not m.IsGoogleVideoUrl(stream.url)
+                    continue for
+                end if
+                if IsArray(stream.drmFamilies) and stream.drmFamilies.Count() > 0
+                    continue for ' encrypted: the helper can't decode it
+                end if
+                score = ValidInt(stream.bitrate)
+                if stream.isOriginal = true or not IsAssociativeArray(stream.audioTrack)
+                    score += 100000000
+                end if
+                if score > bestScore
+                    best = stream
+                    bestScore = score
+                end if
+            end for
+        end for
+        return best
+    end function
+
+    function IsGoogleVideoUrl(url as string) as boolean
+        host = ""
+        rest = url.Mid(url.InStr("://") + 3)
+        slash = rest.InStr("/")
+        if slash <> -1
+            host = rest.Left(slash)
+        end if
+        return host.EndsWith(".googlevideo.com")
+    end function
+
+    function GenerateSpeedAudioAdaptationSet(xml as object, stream as object, id as integer, metadata as object) as integer
+        query = `v=${ValidString(metadata.videoId).EncodeUriComponent()}&itag=${stream.itag}&src=${ValidString(stream.url).EncodeUriComponent()}`
+        base = m.speedAudioHelperUrl
+        if base.EndsWith("/")
+            base = base.Left(base.Len() - 1)
+        end if
+        xml.Comment(`Mono audio from the speed-audio helper (source itag ${stream.itag})`)
+        attributes = {
+            "id": `${id}`
+            "mimeType": "audio/mp4"
+            "codecs": "mp4a.40.2"
+            "audioSamplingRate": "44100"
+            "startWithSAP": "1"
+            "segmentAlignment": "true"
+            "contentType": "audio"
+        }
+        if IsAssociativeArray(stream.audioTrack) and IsString(stream.audioTrack.languageCode)
+            attributes["lang"] = stream.audioTrack.languageCode
+        end if
+        if xml.Node("AdaptationSet", attributes)
+            xml.EmptyNode("AudioChannelConfiguration", {
+                "schemeIdUri": "urn:mpeg:dash:23003:3:audio_channel_configuration:2011"
+                "value": "1"
+            })
+            if xml.Node("Representation", { "id": "speed-audio-mono", "bandwidth": "96000" })
+                xml.EmptyNode("SegmentTemplate", {
+                    "timescale": "1000"
+                    "duration": "4000"
+                    "startNumber": "1"
+                    "initialization": `${base}/a/init.mp4?${query}`
+                    "media": `${base}/a/$Number$.m4s?${query}`
+                })
+                xml.End()
+            end if
+            xml.End()
+        end if
+        return id + 1
     end function
 
     function GenerateVideoAdaptationSets(xml as object, videoGroups as object, id as integer, metadata as object) as integer

@@ -56,6 +56,18 @@ Playback settings in the app.
 The integration suite asserts `#VideoPlayer` is a `VideoPlayerDev`, so it only passes when the lib is built
 with `#const USE_DEV_PLAYER = true`. Filter to a subset, e.g. `npm run test:integration:player -- transport live`.
 
+### Playback speed audio
+
+Roku applies `playbackSpeed` only through pause → set → resume, or when the speed is set before play. Assigning
+it during playback is ignored on Roku OS 15.3.4 (Ultra 4850X and TCL A114X, measured).
+
+Roku's pitch-preserving stretcher processes the left and right channels independently, so stereo audio smears
+between the ears at 1.25x/1.5x. Mono stays centred. With the optional speed-audio helper configured
+(`playback.speed_audio_helper`, see `tools/speed-audio-helper`), VOD DASH streams use the helper's mono track
+at speeds other than 1x. `ReloadForSpeedAudio` swaps the stream url's `speedAudio=mono` flag and replays from
+the current position when a speed change crosses 1x. Without a helper, or if it doesn't answer, playback uses
+the stream's own audio.
+
 ### Playback speed measurement (opt-in)
 
 `npm run test:integration:player -- speed` runs only when named (about six minutes). It selects all eight

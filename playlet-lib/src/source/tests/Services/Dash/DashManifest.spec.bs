@@ -241,6 +241,80 @@ namespace Tests
             m.assertEqual(manifest.GetDurationMs({ isPostLiveDvr: true, adaptiveFormats: [], lengthSeconds: 60 }), 60000&)
         end function
 
+
+        @describe("DashManifest speed-audio helper")
+
+        function SpeedAudioFormats() as object
+            return [
+                { itag: "251", url: "https://rr1.googlevideo.com/videoplayback?itag=251", type: `audio/webm; codecs="opus"`, bitrate: 140000, init: "0-200", index: "201-900", audioSampleRate: "48000", audioChannels: 2 }
+                { itag: "140", url: "https://rr1.googlevideo.com/videoplayback?itag=140&xtags=drc%3D1", type: `audio/mp4; codecs="mp4a.40.2"`, bitrate: 131000, init: "0-700", index: "701-900", audioSampleRate: "44100", audioChannels: 2 }
+                { itag: "140", url: "https://rr1.googlevideo.com/videoplayback?itag=140", type: `audio/mp4; codecs="mp4a.40.2"`, bitrate: 130000, init: "0-700", index: "701-900", audioSampleRate: "44100", audioChannels: 2 }
+                { itag: "139", url: "https://rr1.googlevideo.com/videoplayback?itag=139", type: `audio/mp4; codecs="mp4a.40.5"`, bitrate: 49000, init: "0-700", index: "701-900", audioSampleRate: "22050", audioChannels: 2 }
+                { itag: "136", url: "https://rr1.googlevideo.com/videoplayback?itag=136", type: `video/mp4; codecs="avc1.4D401F"`, bitrate: 1000000, init: "0-700", index: "701-900", width: 1280, height: 720 }
+            ]
+        end function
+
+        ' { audioSets: count, helper: the helper's SegmentTemplate element or invalid, channels }
+        function SpeedAudioManifest(helperUrl as string, formats as object) as object
+            manifest = new DashManifest("")
+            manifest.speedAudioHelperUrl = helperUrl
+            xml = CreateObject("roXMLElement")
+            xml.Parse(manifest.FromVideoMetadata({ videoId: "abc", lengthSeconds: 100, isPostLiveDvr: false, adaptiveFormats: formats, storyboards: [] }, {}, false))
+            result = { audioSets: 0, helper: invalid, channels: invalid }
+            for each adaptationSet in xml.GetNamedElements("Period").GetNamedElements("AdaptationSet")
+                if adaptationSet@contentType <> "audio"
+                    continue for
+                end if
+                result.audioSets += 1
+                for each representation in adaptationSet.GetNamedElements("Representation")
+                    if representation@id = "speed-audio-mono"
+                        result.helper = representation.GetNamedElements("SegmentTemplate")[0]
+                        result.channels = adaptationSet.GetNamedElements("AudioChannelConfiguration")[0]@value
+                    end if
+                end for
+            end for
+            return result
+        end function
+
+        @it("replaces the audio with one mono helper track sourced from the plain AAC stream")
+        function _()
+            r = m.SpeedAudioManifest("http://helper.lan:8098/", m.SpeedAudioFormats())
+            m.assertEqual(r.audioSets, 1)
+            m.assertNotInvalid(r.helper)
+            m.assertEqual(r.channels, "1")
+            src = "https://rr1.googlevideo.com/videoplayback?itag=140".EncodeUriComponent()
+            m.assertEqual(r.helper@initialization, `http://helper.lan:8098/a/init.mp4?v=abc&itag=140&src=${src}`)
+            m.assertEqual(r.helper@media, `http://helper.lan:8098/a/$Number$.m4s?v=abc&itag=140&src=${src}`)
+            m.assertEqual(r.helper@duration, "4000")
+        end function
+
+        @it("keeps the stream's own audio when no helper is set")
+        function _()
+            r = m.SpeedAudioManifest("", m.SpeedAudioFormats())
+            m.assertInvalid(r.helper)
+            m.assertTrue(r.audioSets > 1)
+        end function
+
+        @it("keeps the stream's own audio when the AAC stream isn't a direct googlevideo url")
+        function _()
+            formats = m.SpeedAudioFormats()
+            for each f in formats
+                f.url = f.url.Replace("https://rr1.googlevideo.com", "https://inv.example")
+            end for
+            r = m.SpeedAudioManifest("http://helper.lan:8098", formats)
+            m.assertInvalid(r.helper)
+        end function
+
+        @it("keeps the stream's own audio when the AAC stream is DRM protected")
+        function _()
+            formats = m.SpeedAudioFormats()
+            for each f in formats
+                f.drmFamilies = ["WIDEVINE"]
+            end for
+            r = m.SpeedAudioManifest("http://helper.lan:8098", formats)
+            m.assertInvalid(r.helper)
+        end function
+
     end class
 
 end namespace

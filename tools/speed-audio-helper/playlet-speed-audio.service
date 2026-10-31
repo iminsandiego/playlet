@@ -1,0 +1,12 @@
+[Unit]
+Description=Playlet speed-audio helper (mono audio for Roku playback speed)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/playlet-speed-audio/helper.py
+Environment=PLAYLET_SPEED_AUDIO_PORT=8098
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
