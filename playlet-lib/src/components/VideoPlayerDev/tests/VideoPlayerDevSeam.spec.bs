@@ -5,6 +5,8 @@
 import "pkg:/components/VideoPlayerDev/PlayerCoordinatorLogic.bs"
 import "pkg:/components/VideoPlayerDev/TransportController.bs"
 import "pkg:/components/VideoPlayerDev/VideoNode.bs"
+import "pkg:/source/tests/VideoPlayerDev/PlayerInvariants.bs"
+import "pkg:/source/utils/ArrayUtils.bs"
 import "pkg:/source/utils/Locale.bs"
 import "pkg:/source/utils/RemoteKeys.bs"
 
@@ -194,12 +196,259 @@ namespace Tests
             m.assertEqual(mid.transportMode, TransportController.Mode.Scrub)
             m.assertEqual(mid.control, VideoControl.Pause)
 
-            ' the phone seeks + resumes: Lounge sets control=resume directly on the player node.
+            ' the phone resumes: Lounge sets control=resume directly on the player node.
             m.top.callFunc("TestSetControl", VideoControl.Resume)
             after = m.Snap()
             m.assertEqual(after.transportMode, TransportController.Mode.Idle, "the external resume cancels the transport")
             m.assertEqual(after.control, VideoControl.Resume, "the video plays (the phone action wins)")
             m.assertTrue(after.autoplay, "autoplay restored so a settling seek won't re-freeze the takeover")
+        end function
+
+        ' --- external seek (setSeek) ---
+
+        ' Each arm is asserted: a state that silently failed to arm makes its row vacuous.
+        function ArmSeekState(state as string) as void
+            m.top.callFunc("TestSetup")
+            if state = "first load"
+                m.top.callFunc("TestSetState", VideoState.Buffering)
+                m.assertEqual(m.Snap().spinnerMode, SpinMode.Loading, "armed: " + state)
+                return
+            end if
+            m.top.callFunc("TestSetState", VideoState.Playing)
+            if Left(state, 4) = "live"
+                m.top.callFunc("TestSetLive", 43200000) ' 12h edge, 4h window: floor 8h
+            else
+                m.top.duration = 600.0
+                m.top.position = 300.0
+            end if
+            if state = "idle paused"
+                m.top.callFunc("TestKey", RemoteKeys.Play, true)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+            else if state = "idle buffering"
+                m.top.callFunc("TestSetState", VideoState.Buffering)
+            else if state = "repause pending"
+                m.top.callFunc("TestKey", RemoteKeys.Play, true)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+                m.top.callFunc("TestKey", RemoteKeys.Replay, true)
+                m.top.callFunc("TestSetState", VideoState.Buffering)
+            else if state = "replay in flight"
+                m.top.callFunc("TestKey", RemoteKeys.Replay, true)
+                m.assertTrue(m.Snap().replayPending, "armed: " + state)
+            else if state = "chrome/bar"
+                m.top.callFunc("TestKey", RemoteKeys.Up, true)
+                m.assertTrue(m.Snap().chromeShown, "armed: " + state)
+            else if state = "chrome fading"
+                m.top.callFunc("TestKey", RemoteKeys.Up, true)
+                m.top.callFunc("TestKey", RemoteKeys.Back, true)
+                m.assertTrue(m.Snap().chromeFadingOut, "armed: " + state)
+            else if state = "minimized"
+                m.top.container.fullscreen = false
+                m.assertTrue(m.Snap().suppressCaptions, "armed: " + state)
+            else if state = "scrub" or state = "live dvr"
+                m.top.callFunc("TestKey", RemoteKeys.Left, true)
+                m.top.callFunc("TestKey", RemoteKeys.Left, false)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+            else if state = "scrub held"
+                m.top.callFunc("TestKey", RemoteKeys.Left, true)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+            else if state = "scan"
+                m.top.callFunc("TestKey", RemoteKeys.FastForward, true)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+            else if state = "live scan"
+                m.top.callFunc("TestKey", RemoteKeys.Rewind, true)
+                m.top.callFunc("TestKey", RemoteKeys.Rewind, false)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+            else if state = "deferred freeze"
+                ' commit, then an immediate re-scrub while the commit's seek is still settling: no freeze sent.
+                m.top.callFunc("TestKey", RemoteKeys.Left, true)
+                m.top.callFunc("TestKey", RemoteKeys.Left, false)
+                m.top.callFunc("TestSetState", VideoState.Paused)
+                m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+                m.top.callFunc("TestSetState", VideoState.Buffering)
+                m.top.callFunc("TestKey", RemoteKeys.Left, true)
+                m.assertTrue(m.Snap().seekSettling, "armed: " + state)
+            end if
+            snap = m.Snap()
+            mode = snap.transportMode
+            m.assertEqual(snap.brain.isLive, Left(state, 4) = "live", "armed: " + state)
+            if state = "scrub" or state = "scrub held" or state = "deferred freeze"
+                m.assertEqual(mode, TransportController.Mode.Scrub, "armed: " + state)
+            else if state = "scan"
+                m.assertEqual(mode, TransportController.Mode.Scan, "armed: " + state)
+            else if state = "live dvr"
+                m.assertEqual(mode, TransportController.Mode.LiveDvr, "armed: " + state)
+                m.assertEqual(snap.brain.scanLevel, 0, "armed: " + state)
+            else if state = "live scan"
+                m.assertEqual(mode, TransportController.Mode.LiveDvr, "armed: " + state)
+                m.assertTrue(snap.brain.scanLevel >= 1, "armed: " + state)
+            else
+                m.assertEqual(mode, TransportController.Mode.Idle, "armed: " + state)
+            end if
+        end function
+
+        ' Every state a seek from outside the player (setSeek) can arrive in. It lands idle at the target with the
+        ' brain consistent; it keeps the play state (a paused video is re-paused on landing), and out of a
+        ' transport it resumes, the chrome cleared.
+        @it("setSeek in every reachable player state lands idle at the target, keeping the play state")
+        function _()
+            transports = ["scrub", "scrub held", "scan", "deferred freeze", "live dvr", "live scan"]
+            paused = ["idle paused", "repause pending"]
+            states = ["idle playing", "idle buffering", "replay in flight", "chrome/bar", "chrome fading", "minimized", "first load", "live idle"]
+            states.Append(paused)
+            states.Append(transports)
+            for each state in states
+                m.ArmSeekState(state)
+                wasTransport = ArrayUtils.IndexOfString(transports, state) <> -1
+                targetS = 30.5
+                if Left(state, 4) = "live"
+                    targetS = 40000.0 ' inside the live window
+                end if
+                before = m.Snap()
+                m.top.callFunc("TestSetControl", VideoControl.None) ' so a control write below is the seek's
+                m.top.seek = -1
+
+                m.top.setSeek = targetS
+                snap = m.Snap()
+                where = " — " + state
+                m.assertEqual(snap.transportMode, TransportController.Mode.Idle, "idle" + where)
+                m.assertFalse(snap.bifVisible, "no bif" + where)
+                m.assertEqual(Int(m.top.seek * 1000), Int(targetS * 1000), "seeked to the target" + where)
+                m.assertTrue(snap.autoplay, "autoplay restored" + where)
+                m.assertFalse(snap.replayPending, "no replay chain" + where)
+                m.assertEqual(snap.transportTimerControl, "stop", "transport timer stopped" + where)
+                brainCheck = PlayerInvariants.CheckBrain(snap.brain)
+                m.assertTrue(brainCheck.ok, brainCheck.failed + where)
+                if wasTransport
+                    m.assertEqual(snap.control, VideoControl.Resume, "the transport resumes from the target" + where)
+                    m.assertFalse(snap.chromeShown, "the chrome cleared" + where)
+                else
+                    m.assertEqual(snap.control, VideoControl.None, "no control write: the play state is kept" + where)
+                    m.assertEqual(snap.spinnerMode, before.spinnerMode, "spinner untouched" + where)
+                    m.assertEqual(snap.chromeShown, before.chromeShown, "chrome untouched" + where)
+                    m.assertEqual(snap.chromeFadingOut, before.chromeFadingOut, "chrome fade untouched" + where)
+                end if
+                if state = "chrome/bar"
+                    m.assertEqual(snap.barPositionMs, Int(targetS * 1000), "the visible bar shows the target before it lands")
+                end if
+
+                ' the device lands and (on any seek) plays.
+                m.top.callFunc("TestSetState", VideoState.Playing)
+                landed = m.Snap()
+                m.assertEqual(landed.transportMode, TransportController.Mode.Idle, "still idle on landing" + where)
+                if ArrayUtils.IndexOfString(paused, state) <> -1
+                    m.assertEqual(landed.control, VideoControl.Pause, "re-paused on landing" + where)
+                else if wasTransport
+                    m.assertEqual(landed.control, VideoControl.Resume, "not re-frozen on landing" + where)
+                else
+                    m.assertEqual(landed.control, VideoControl.None, "untouched on landing" + where)
+                end if
+            end for
+        end function
+
+        @it("setSeek under a held scrub: the later key-up is a no-op at idle")
+        function _()
+            m.ArmSeekState("scrub held")
+            m.top.setSeek = 30.5
+            control = m.Snap().control
+            m.top.callFunc("TestKey", RemoteKeys.Left, false)
+            snap = m.Snap()
+            m.assertEqual(snap.transportMode, TransportController.Mode.Idle)
+            m.assertEqual(snap.control, control)
+        end function
+
+        @it("setSeek ends an InstantReplay chain: the next replay goes back from the setSeek target")
+        function _()
+            m.ArmSeekState("replay in flight")
+            m.top.setSeek = 100.0
+            m.top.callFunc("TestKey", RemoteKeys.Replay, true)
+            m.assertEqual(Int(m.top.seek * 1000), 80000)
+        end function
+
+        @it("setSeek seeks every time it is set, the same target included")
+        function _()
+            m.top.setSeek = 42.0
+            m.assertEqual(Int(m.top.seek * 1000), 42000)
+            m.top.seek = -1
+            m.top.setSeek = 42.0
+            m.assertEqual(Int(m.top.seek * 1000), 42000)
+        end function
+
+        @it("setSeek while the content loads becomes the content-load seek, over the resume timestamp")
+        function _()
+            m.top.callFunc("TestSetContentLoading", true)
+            m.top.seek = -1
+            m.top.setSeek = 30.5
+            m.assertEqual(m.top.seek, -1.0, "no seek while there is no content to seek")
+            m.top.callFunc("TestSetContentLoading", false)
+            content = CreateObject("roSGNode", "ContentNode")
+            content.AddFields({ timestamp: 42 })
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(Int(m.top.seek * 1000), 30500)
+            ' consumed: a later content-load seek (an error retry) goes back to the content's own start.
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(Int(m.top.seek * 1000), 42000)
+        end function
+
+        ' --- content-load seek ---
+
+        @it("the content-load seek goes to the live edge on live content")
+        function _()
+            content = CreateObject("roSGNode", "ContentNode")
+            content.Live = true
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(m.top.seek, 999999.0)
+        end function
+
+        @it("the content-load seek goes to the resume timestamp")
+        function _()
+            content = CreateObject("roSGNode", "ContentNode")
+            content.AddFields({ timestamp: 42 })
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(Int(m.top.seek * 1000), 42000)
+        end function
+
+        @it("the content-load seek goes to the percent watched of the video's length")
+        function _()
+            content = CreateObject("roSGNode", "ContentNode")
+            content.AddFields({ percentDurationWatched: 25.0, metadata: { lengthSeconds: 600 } })
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(Int(m.top.seek * 1000), 150000)
+        end function
+
+        @it("the content-load seek skips the percent watched when the video's length is unknown")
+        function _()
+            for each metadata in [{}, { lengthSeconds: 0 }]
+                m.top.seek = -1
+                content = CreateObject("roSGNode", "ContentNode")
+                content.AddFields({ percentDurationWatched: 25.0, metadata: metadata })
+                m.top.callFunc("TestSeekToInitialPosition", content)
+                m.top.duration = 600.0
+                m.assertEqual(m.top.seek, -1.0, FormatJson(metadata))
+            end for
+        end function
+
+        @it("the content-load seek skips the percent watched on a video shorter than 30 seconds")
+        function _()
+            m.top.seek = -1
+            content = CreateObject("roSGNode", "ContentNode")
+            content.AddFields({ percentDurationWatched: 50.0, metadata: { lengthSeconds: 29 } })
+            m.top.callFunc("TestSeekToInitialPosition", content)
+            m.assertEqual(m.top.seek, -1.0)
+        end function
+
+        @it("an error retry seeks to the percent watched before it plays")
+        function _()
+            content = CreateObject("roSGNode", "ContentNode")
+            content.AddFields({
+                videoId: "vid1"
+                playletStreamUrls: ["http://a", "http://b"]
+                playletStreamUrlIndex: 0
+                percentDurationWatched: 25.0
+                metadata: { lengthSeconds: 600 }
+            })
+            content.url = "http://a"
+            m.assertEqual(m.top.callFunc("TestErrorRetry", content), 150.0)
+            m.assertEqual(content.url, "http://b", "retried the next stream url")
         end function
 
         @it("the error dialog displays every captured error field, not just the category")
@@ -463,6 +712,110 @@ namespace Tests
             m.top.callFunc("TestKey", RemoteKeys.Ok, true)
             m.assertEqual(m.top.seek, seekBefore, "no seek was issued: the skip resolved to finish")
             m.assertTrue(m.top.videoQueue.closePlayer, "no next video -> the finish closed the player")
+        end function
+
+        ' =========================================================================================
+        ' SponsorBlock skip — the device lands a seek on the sync frame BEFORE its target when it can't seek
+        ' accurately (measured 3.3-6.7s short); the position ticks then echo the target before the landing.
+        ' =========================================================================================
+
+        function AutoSegment(startS as float, endS as float) as object
+            return [{ start: startS, end: endS, option: "auto_skip", title: "Sponsor", shortTitle: "Sponsor", actionText: "Skipped", showNotification: false, UUID: "seg-auto", category: "sponsor" }]
+        end function
+
+        ' -1 = the coordinator wrote no seek since the spec armed the probe.
+        function ArmSeekProbe() as void
+            m.top.seek = -1
+        end function
+
+        function AssertSeekedTo(targetS as float, message as string) as void
+            m.assertTrue(Abs(m.top.seek - targetS) < 0.01, message + " (seek=" + m.top.seek.ToStr() + ")")
+        end function
+
+        @it("an auto-skip seeks once: the target echo and a landing short of it inside the segment don't re-seek")
+        function _()
+            m.top.duration = 300
+            m.top.callFunc("TestSeedSponsorBlock", m.AutoSegment(60.0, 75.3))
+            m.top.position = 60.0
+            m.AssertSeekedTo(75.3, "entering the segment skips to its end")
+
+            m.ArmSeekProbe()
+            for each positionS in [75.3, 72.0, 73.0, 74.0, 75.0, 76.0]
+                m.top.position = positionS
+            end for
+            m.assertEqual(m.top.seek, -1.0, "the skip loop: a landing inside the segment re-armed it")
+            m.assertEqual(m.top.sponsorViewedCount, 1)
+        end function
+
+        @it("a landing before a short segment's start doesn't re-seek when playback re-enters it")
+        function _()
+            m.top.duration = 300
+            m.top.callFunc("TestSeedSponsorBlock", m.AutoSegment(131.5, 137.7))
+            m.top.position = 132.0
+            m.AssertSeekedTo(137.7, "entering the segment skips to its end")
+
+            m.ArmSeekProbe()
+            for each positionS in [137.7, 131.0, 132.0, 133.0, 137.0, 138.0]
+                m.top.position = positionS
+            end for
+            m.assertEqual(m.top.seek, -1.0, "the skip loop: re-entering the segment from the landing re-armed it")
+        end function
+
+        @it("a user seek back into a skipped segment skips it again, and reports it once")
+        function _()
+            m.top.duration = 300
+            m.top.callFunc("TestSeedSponsorBlock", m.AutoSegment(60.0, 100.0))
+            m.top.position = 60.0
+            m.top.position = 100.0
+            m.top.position = 95.0
+
+            m.top.callFunc("TestKey", RemoteKeys.Replay, true) ' InstantReplay: 95s - 20s
+            m.AssertSeekedTo(75.0, "the replay seek")
+            m.top.position = 75.0
+            m.AssertSeekedTo(100.0, "the user's seek woke the segment: it skips again")
+            m.assertEqual(m.top.sponsorViewedCount, 1, "a segment is reported once per viewing")
+        end function
+
+        @it("a setSeek back into a skipped segment skips it again")
+        function _()
+            m.top.duration = 300
+            m.top.callFunc("TestSeedSponsorBlock", m.AutoSegment(60.0, 100.0))
+            m.top.position = 60.0
+            m.top.position = 100.0
+            m.top.position = 95.0
+
+            m.top.setSeek = 70.0
+            m.AssertSeekedTo(70.0, "the external seek")
+            m.top.position = 70.0
+            m.AssertSeekedTo(100.0, "the external seek woke the segment: it skips again")
+        end function
+
+        @it("an OK skip landing short inside the segment doesn't re-arm the notice")
+        function _()
+            m.top.duration = 100
+            m.top.callFunc("TestSeedSponsorBlock", m.ManualSegment(10.0, 40.0))
+            m.top.position = 12.0
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.AssertSeekedTo(40.0, "OK skips to the segment end")
+
+            m.top.position = 40.0
+            m.top.position = 34.0
+            m.top.position = 35.0
+            m.assertFalse(m.Snap().sponsorNoticeShown, "the landing re-armed the notice")
+        end function
+
+        @it("the manual notice comes down once OK can no longer skip")
+        function _()
+            m.top.duration = 100
+            m.top.callFunc("TestSeedSponsorBlock", m.ManualSegment(10.0, 40.0))
+            m.top.position = 12.0
+            m.assertTrue(m.Snap().sponsorNoticeShown)
+            m.top.position = 38.5 ' within 2s of the end: a skip is no longer worth a rebuffer
+            m.assertFalse(m.Snap().sponsorNoticeShown)
+
+            seekBefore = m.top.seek
+            m.top.callFunc("TestKey", RemoteKeys.Ok, true)
+            m.assertEqual(m.top.seek, seekBefore, "OK no longer skips")
         end function
 
         @it("the non-transport keys act on the key-DOWN edge only")
@@ -1154,7 +1507,7 @@ namespace Tests
                 classified[name] = "axis"
             end for
             ' flags / scratch — one-shot latches and counters with a single consuming path.
-            for each name in ["onCloseCalled", "ignoreNextFinished", "videoPlayedSuccessfully", "firstFrameSeen", "showFullScreenHint", "repauseAfterSeek", "seekToPercent", "watchTimeMarker", "reportWatchTime", "errorDialogNode", "lastCommitSeq", "lastFinishSeq", "liveAstSeconds", "liveFallbackEdgeMs", "liveFallbackAtSeconds", "liveBadgeHoldActive", "currentPlaybackSpeedOverride"]
+            for each name in ["onCloseCalled", "ignoreNextFinished", "videoPlayedSuccessfully", "firstFrameSeen", "showFullScreenHint", "repauseAfterSeek", "loadingSetSeekMs", "watchTimeMarker", "reportWatchTime", "errorDialogNode", "lastCommitSeq", "lastFinishSeq", "liveAstSeconds", "liveFallbackEdgeMs", "liveFallbackAtSeconds", "liveBadgeHoldActive", "currentPlaybackSpeedOverride"]
                 classified[name] = "flag"
             end for
             ' NOT coordinator state — node-scope + test-environment entries, pinned EXPLICITLY (no hidden
@@ -1220,7 +1573,7 @@ namespace Tests
             container.fullscreen = true
             ' close the player (what the queue does when replacing the video), then throw every signal a dead
             ' player might still receive at it: fullscreen flips (the * key), device edges from the async stop,
-            ' a stray control/seek write, late thumbnails and buffering/start info, a second close. OnClose unobserves them all.
+            ' a stray control/seek/setSeek write, late thumbnails and buffering/start info, a second close. OnClose unobserves them all.
             m.top.close = true
             container.fullscreen = false
             container.fullscreen = true
@@ -1231,6 +1584,8 @@ namespace Tests
             m.top.position = 12.0
             m.top.duration = 99.0
             m.top.seek = 5.0
+            m.top.setSeek = 7.0
+            m.assertEqual(m.top.seek, 5.0, "the closed player ignored the setSeek")
             m.top.thumbnailTiles = { x: [{ htiles: 1 }] }
             m.top.bufferingStatus = { isUnderrun: true, percentage: 0, prebufferDone: false, actualStart: 0 }
             m.top.playStartInfo = { start_type: "cseek", total_dur: 0.1 }

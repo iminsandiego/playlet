@@ -1,5 +1,6 @@
 import "pkg:/components/Services/LoungeService/LoungeApi.bs"
 import "pkg:/source/tests/LoggingGlobals.bs"
+import "pkg:/source/utils/RegistryUtils.bs"
 import "pkg:/source/utils/StringUtils.bs"
 
 namespace Tests
@@ -10,10 +11,17 @@ namespace Tests
 
         protected override function setup()
             m.logLevel = Tests.MuteLogger()
+            ' Rebind saves the test lounge as the last one, which the next app launch disconnects from.
+            m.lastLoungeData = RegistryUtils.Read(RegistryUtils.LAST_LOUNGE_DATA)
         end function
 
         protected override function tearDown()
             m.global.logger.logLevel = m.logLevel
+            if m.lastLoungeData = invalid
+                RegistryUtils.Delete(RegistryUtils.LAST_LOUNGE_DATA)
+            else
+                RegistryUtils.Write(RegistryUtils.LAST_LOUNGE_DATA, m.lastLoungeData)
+            end if
         end function
 
         @describe("Lounge token-refresh recovery (live)")
@@ -42,6 +50,83 @@ namespace Tests
             m.assertFalse(StringUtils.IsNullOrEmpty(api.gSessionId), "no gSessionId after rebind")
         end function
 
+        @slow(30000)
+        @it("sends the messages a bind calls for, each completing on the service loop's port")
+        function _()
+            api = m.CreateLiveApi()
+            api.GetScreenId()
+            api.GetToken()
+            m.assertTrue(api.GetSessionData(), "bind failed")
+            sends = []
+            sends.Append(api.pendingOutgoingMessages)
+            m.assertNotEmpty(sends, "the bind sent no messages")
+
+            m.RunLoop(api, 10000, function(api as object) as boolean
+                return api.pendingOutgoingMessages.Count() = 0
+            end function)
+            m.AssertSendsSucceeded(sends)
+        end function
+
+        @slow(60000)
+        @it("polls the backchannel over HTTPS: the server holds the poll, then answers with a frame")
+        function _()
+            api = m.CreateLiveApi()
+            api.GetScreenId()
+            api.GetToken()
+            m.assertTrue(api.GetSessionData(), "bind failed")
+
+            api.StartPoll()
+            m.assertTrue(api.backchannel.IsPolling())
+            timer = CreateObject("roTimespan")
+            m.RunLoop(api, 50000, function(api as object) as boolean
+                return not api.backchannel.IsPolling()
+            end function)
+            m.assertEqual(api.backchannel.closeReason, LoungeCloseReason.Complete, `status ${api.backchannel.statusCode}`)
+            m.assertEqual(api.backchannel.statusCode, 200)
+            m.assertTrue(timer.TotalMilliseconds() > 5000, `answered after ${timer.TotalMilliseconds()} ms: AID didn't acknowledge the bind's commands`)
+        end function
+
+        @slow(30000)
+        @it("Rebind cancels the replaced session's sends, and the new session's sends complete")
+        function _()
+            api = m.CreateLiveApi()
+            api.GetScreenId()
+            api.GetToken()
+            m.assertTrue(api.GetSessionData(), "bind failed")
+            replacedSends = []
+            replacedSends.Append(api.pendingOutgoingMessages)
+            m.assertNotEmpty(replacedSends, "the bind sent no messages")
+
+            m.assertTrue(api.Rebind(true), "rebind failed")
+
+            for each pending in replacedSends
+                m.assertTrue(pending.Handle(invalid).IsCancelled(), "a send of the replaced session was not cancelled")
+            end for
+
+            sends = []
+            sends.Append(api.pendingOutgoingMessages)
+            m.assertNotEmpty(sends, "the rebind sent no messages")
+            m.RunLoop(api, 10000, function(api as object) as boolean
+                return api.pendingOutgoingMessages.Count() = 0
+            end function)
+            m.AssertSendsSucceeded(sends)
+        end function
+
+        private function RunLoop(api as object, limitMs as integer, done as function) as void
+            timer = CreateObject("roTimespan")
+            while not done(api) and timer.TotalMilliseconds() < limitMs
+                api.HandleMessage(wait(api.MaxWaitMs(), m.messagePort), [])
+            end while
+        end function
+
+        private function AssertSendsSucceeded(sends as object) as void
+            for each pending in sends
+                response = pending.Handle(invalid)
+                m.assertNotInvalid(response, "a send did not complete")
+                m.assertEqual(response.StatusCode(), 200, response.ErrorMessage())
+            end for
+        end function
+
         private function CreateLiveApi() as object
             loungeServiceNode = CreateObject("roSGNode", "Node")
             loungeServiceNode.addFields({
@@ -52,7 +137,8 @@ namespace Tests
             queueStub = CreateObject("roSGNode", "Node")
             queueStub.addFields({ hasPrevious: false, hasNext: false })
             notifyStub = CreateObject("roSGNode", "Node")
-            return new LoungeApi(loungeServiceNode, queueStub, notifyStub, invalid)
+            m.messagePort = CreateObject("roMessagePort")
+            return new LoungeApi(loungeServiceNode, queueStub, notifyStub, invalid, m.messagePort)
         end function
 
     end class

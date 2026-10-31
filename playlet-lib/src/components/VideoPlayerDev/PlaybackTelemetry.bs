@@ -1,3 +1,6 @@
+import "pkg:/components/Services/Dash/LiveLoadCounts.bs"
+import "pkg:/components/Services/Innertube/DrmLicenseRequests.bs"
+import "pkg:/components/Telemetry/VideoLoadHandoff.bs"
 import "pkg:/components/VideoPlayerDev/VideoNode.bs"
 import "pkg:/source/utils/ErrorUtils.bs"
 import "pkg:/source/utils/Locale.bs"
@@ -105,6 +108,8 @@ namespace PlaybackTelemetry
         private healSamples as object = invalid
         private tailResolveCount as integer = 0
         private tailResolveSamples as object = invalid
+        private startSegmentBitrateBps as integer = 0
+        private startMeasuredBitrateBps as integer = 0
 
         function new(deps as object)
             m.playerTimer = deps.playerTimer
@@ -128,6 +133,7 @@ namespace PlaybackTelemetry
                 m.span = PlaybackTelemetry.Span.Playing
                 if m.firstPlayingAtMs < 0
                     m.firstPlayingAtMs = nowMs
+                    m.startMeasuredBitrateBps = ValidInt(ValidAssociativeArray(m.top.streamInfo).measuredBitrate)
                 end if
                 ' playing under an error dialog: the playback recovered, so the error did not end it.
                 if m.outcome = PlaybackTelemetry.Outcome.Error
@@ -168,6 +174,18 @@ namespace PlaybackTelemetry
             if m.playStartInfos.Count() < PlaybackTelemetry.PLAY_START_SAMPLE_CAP
                 m.playStartInfos.Push(info)
             end if
+        end function
+
+        ' True once the first segment carrying video started streaming: its bitrate is the one kept.
+        function OnStreamingSegment(segment as object) as boolean
+            if segment = invalid or not IsInt(segment.segType)
+                return false
+            end if
+            if segment.segType <> SegmentType.Mux and segment.segType <> SegmentType.Video
+                return false
+            end if
+            m.startSegmentBitrateBps = ValidInt(segment.segBitrateBps)
+            return true
         end function
 
         function OnErrorDialog() as void
@@ -215,9 +233,8 @@ namespace PlaybackTelemetry
 
         function ReportVideoError(errorData as object, errorInfo as object, url as dynamic, urlIndex as dynamic, shownInDialog as boolean) as void
             m.errorCount += 1
-            ' malformed data: the last generated DASH/HLS manifest and player response diagnose it from the report.
             attachments = invalid
-            if errorData.body.Instr("malformed data") <> -1 or errorData.body.Instr("invalid pathname") <> -1
+            if errorData.body.Instr("malformed data") <> -1 or errorData.body.Instr("invalid pathname") <> -1 or ((errorInfo = invalid or errorInfo.category <> "http") and errorData.body.Instr("last_err:") = -1)
                 attachments = [{
                     filename: "last_generated_dash.xml"
                     content_type: "plain/text"
@@ -328,12 +345,25 @@ namespace PlaybackTelemetry
                 "tail_resolve_count": m.tailResolveCount
                 "tail_resolve_samples": m.tailResolveSamples
             }
+            if m.transport.isLive
+                liveLoadCounts = ValidAssociativeArray(VideoLoadHandoff.ReadAndDelete(LIVE_LOAD_COUNTS_PATH, summary["video_load_id"]))
+                summary["live_head"] = liveLoadCounts["live_head"]
+                summary["live_timeline"] = liveLoadCounts["live_timeline"]
+                summary["start_segment_bitrate_bps"] = m.startSegmentBitrateBps
+                summary["start_measured_bitrate_bps"] = m.startMeasuredBitrateBps
+            end if
             if content <> invalid
+                summary["video_id"] = content.videoId
                 summary["stream_source"] = content.playletStreamSource
                 summary["drm"] = not StringUtils.IsNullOrEmpty(ValidAssociativeArray(content.drmParams).keySystem)
                 summary["stream_url_index"] = content.playletStreamUrlIndex
-                if m.firstPlayingAtMs < 0 or m.underrunCount > 0 or m.bufferingsWithoutStatusCount > 0 or m.isUnderrunChangeCount > 0 or m.errorCount > 0 or m.healCount > 0 or m.outcome = PlaybackTelemetry.Outcome.Error
-                    summary["video_id"] = content.videoId
+                if summary["drm"]
+                    summary["drm_license_requests"] = VideoLoadHandoff.ReadAndDelete(DRM_LICENSE_REQUESTS_PATH, summary["video_load_id"])
+                    summary["widevine_security_level"] = ValidAssociativeArray(CreateObject("roDeviceInfo").GetDrmInfoEx().Widevine).securityLevel
+                    hdmiStatus = CreateObject("roHdmiStatus")
+                    if hdmiStatus <> invalid
+                        summary["hdcp_version"] = hdmiStatus.GetHdcpVersion()
+                    end if
                 end if
             end if
             LogTelemetryEvent({

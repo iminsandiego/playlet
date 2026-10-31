@@ -2264,7 +2264,7 @@ namespace Innertube
             }, {
                 filename: "request.txt"
                 content_type: "text/plain"
-                data: context.response.request.ToCurlCommand()
+                data: context.request.ToCurlCommand()
             }]
         })
     end function

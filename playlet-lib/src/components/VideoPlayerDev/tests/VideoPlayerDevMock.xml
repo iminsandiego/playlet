@@ -29,6 +29,8 @@
         <field id="errorInfo" type="assocarray" />
         <field id="bufferingStatus" type="assocarray" alwaysNotify="true" />
         <field id="playStartInfo" type="assocarray" alwaysNotify="true" />
+        <field id="streamingSegment" type="assocarray" alwaysNotify="true" />
+        <field id="streamInfo" type="assocarray" />
         <!-- AutoBind deps + layout (set by TestSetup; NOT bound). -->
         <field id="appController" type="node" />
         <field id="jobQueue" type="node" />
@@ -45,11 +47,16 @@
         <field id="minRect" type="rect2D" value="[834,460,426,240]" />
         <field id="maxRect" type="rect2D" value="[0,0,1280,720]" />
         <field id="close" type="boolean" alwaysNotify="true" />
+        <field id="setSeek" type="float" alwaysNotify="true" />
         <!-- test-only probe: how many times the coordinator pulsed ButtonRow.nudge (TestSetup observes it). -->
         <field id="nudgeCount" type="integer" />
         <field id="queuePreviousCount" type="integer" />
         <field id="queueNextCount" type="integer" />
         <field id="testOpenedChannelId" type="string" />
+        <!-- test-only probe: how many SponsorBlock viewed-segment reports the coordinator queued. -->
+        <field id="sponsorViewedCount" type="integer" />
+        <!-- test-only probe: the seek the device held when the coordinator last wrote control=play. -->
+        <field id="seekAtPlay" type="float" />
         <!-- the Video-only method Initialize calls, plus the spec's drivers (callFunc reaches only interface funcs). -->
         <function name="getHttpAgent" />
         <function name="TestSetup" />
@@ -70,6 +77,9 @@
         <function name="TestResetPlaybackSpeedForNewContent" />
         <function name="TestClosePlaybackSpeed" />
         <function name="TestSetChapters" />
+        <function name="TestSeekToInitialPosition" />
+        <function name="TestErrorRetry" />
+        <function name="TestSetContentLoading" />
         <function name="TestFireLiveBadgeHold" />
         <function name="TestKillAutoHide" />
         <function name="TestFinishChromeFadeOut" />

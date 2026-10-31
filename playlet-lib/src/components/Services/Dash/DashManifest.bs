@@ -54,7 +54,6 @@ class DashManifest
             adaptiveFormats = m.ProxyFormatsThroughInvidious(adaptiveFormats)
         end if
 
-        duration = m.GetDuration(metadata)
         isLive = ValidBool(metadata.liveNow)
 
         groupings = m.CreateFormatGroupings(adaptiveFormats, metadata.isPostLiveDvr, isLive)
@@ -119,7 +118,7 @@ class DashManifest
         else
             mpdAttributes["profiles"] = "urn:mpeg:dash:profile:full:2011"
             mpdAttributes["type"] = "static"
-            mpdAttributes["mediaPresentationDuration"] = `PT${duration}S`
+            mpdAttributes["mediaPresentationDuration"] = m.FormatDuration(m.GetDurationMs(metadata))
         end if
 
         ' Live needs an explicit Period start to anchor the timeline against availabilityStartTime.
@@ -169,17 +168,17 @@ class DashManifest
         return proxied
     end function
 
-    function GetDuration(metadata as object) as dynamic
-        if metadata["isPostLiveDvr"] = true and IsInt(metadata["postLiveDvrDurationMs"])
-            return metadata["postLiveDvrDurationMs"] / 1000.0
+    function GetDurationMs(metadata as object) as longinteger
+        if metadata["isPostLiveDvr"] = true and metadata["postLiveDvrDurationMs"] <> invalid
+            return metadata["postLiveDvrDurationMs"]
         end if
 
-        approxDurationMs = ValidString(ObjectUtils.Dig(metadata, ["adaptiveFormats", 0, "approxDurationMs"])).ToInt()
-        if approxDurationMs > 0
-            return approxDurationMs / 1000.0
+        approxDurationMs = StringUtils.ParseJsonSafe(ObjectUtils.Dig(metadata, ["adaptiveFormats", 0, "approxDurationMs"]))
+        if IsNumber(approxDurationMs) and approxDurationMs > 0
+            return approxDurationMs
         end if
 
-        return ValidInt(metadata["lengthSeconds"])
+        return ValidInt(metadata["lengthSeconds"]) * 1000&
     end function
 
     ' `durationRuns` ascending.
@@ -246,7 +245,7 @@ class DashManifest
         return seqnum
     end function
 
-    function FormatDuration(ms as integer) as string
+    function FormatDuration(ms as longinteger) as string
         return `PT${ms \ 1000}.${Right("00" + (ms mod 1000).ToStr(), 3)}S`
     end function
 
@@ -265,6 +264,10 @@ class DashManifest
             end if
 
             if not IsString(format.type)
+                continue for
+            end if
+
+            if m.HasOnlyUnsupportedDrm(format)
                 continue for
             end if
 
@@ -324,7 +327,12 @@ class DashManifest
                 audioTrackId = format.audioTrack.id
             end if
 
-            groupId = `${mimeType}-${justCodec}-${colorInfo}-${audioTrackId}${m.GetAudioVariantSuffix(format)}`
+            drmFamilies = ""
+            if IsArray(format.drmFamilies)
+                drmFamilies = format.drmFamilies.Join("+")
+            end if
+
+            groupId = `${mimeType}-${justCodec}-${colorInfo}-${audioTrackId}${m.GetAudioVariantSuffix(format)}-${drmFamilies}`
 
             if groupInfo[groupId] = invalid
                 groupInfo[groupId] = []
@@ -474,14 +482,7 @@ class DashManifest
             end if
 
             if xml.Node("AdaptationSet", adaptationSetAttributes)
-                if IsArray(firstFormat.drmFamilies)
-                    for each drmFamily in firstFormat.drmFamilies
-                        systemId = m.GetDrmSystemId(drmFamily)
-                        if IsString(systemId)
-                            xml.EmptyNode("ContentProtection", { "schemeIdUri": `urn:uuid:${systemId}` })
-                        end if
-                    end for
-                end if
+                m.AddContentProtection(xml, firstFormat)
 
                 if IsAssociativeArray(firstFormat.audioTrack) or firstFormat.isDrc = true or firstFormat.isVoiceBoost = true
                     ' Roles
@@ -575,14 +576,7 @@ class DashManifest
             end if
 
             if xml.Node("AdaptationSet", adaptationSetAttributes)
-                if IsArray(firstFormat.drmFamilies)
-                    for each drmFamily in firstFormat.drmFamilies
-                        systemId = m.GetDrmSystemId(drmFamily)
-                        if IsString(systemId)
-                            xml.EmptyNode("ContentProtection", { "schemeIdUri": `urn:uuid:${systemId}` })
-                        end if
-                    end for
-                end if
+                m.AddContentProtection(xml, firstFormat)
 
                 m.AddColorInfo(firstFormat, xml)
 
@@ -638,8 +632,7 @@ class DashManifest
             if not IsInt(postLiveDvrSegmentCount)
                 xml.Comment(`[ERROR] Post-Live DVR metadata missing postLiveDvrSegmentCount for itag: ${stream.itag}`)
                 ' We're going to guess segment count from targetDurationSec and total duration
-                totalDurationMs = m.GetDuration(metadata) * 1000.0
-                postLiveDvrSegmentCount = MathUtils.Max(Fix(totalDurationMs / (stream.targetDurationSec * 1000)), 1)
+                postLiveDvrSegmentCount = MathUtils.Max(Fix(m.GetDurationMs(metadata) / (stream.targetDurationSec * 1000)), 1)
                 xml.Comment(`[INFO] Guessing postLiveDvrSegmentCount as ${postLiveDvrSegmentCount} for itag: ${stream.itag}`)
             end if
 
@@ -1015,6 +1008,32 @@ class DashManifest
             "id": id
             "languageCode": lang.Tokenize("-")[0]
         }
+    end function
+
+    ' DRM movies have formats whose only DRM family is FAIRPLAY, which no ContentProtection Roku supports can declare.
+    function HasOnlyUnsupportedDrm(format as object) as boolean
+        if not IsArray(format.drmFamilies) or format.drmFamilies.Count() = 0
+            return false
+        end if
+        for each drmFamily in format.drmFamilies
+            if IsString(m.GetDrmSystemId(drmFamily))
+                return false
+            end if
+        end for
+        return true
+    end function
+
+    ' A set's formats share their drmFamilies: CreateFormatGroupings keys groups on them.
+    function AddContentProtection(xml as object, format as object) as void
+        if not IsArray(format.drmFamilies)
+            return
+        end if
+        for each drmFamily in format.drmFamilies
+            systemId = m.GetDrmSystemId(drmFamily)
+            if IsString(systemId)
+                xml.EmptyNode("ContentProtection", { "schemeIdUri": `urn:uuid:${systemId}` })
+            end if
+        end for
     end function
 
     function GetDrmSystemId(drmFamily as dynamic) as dynamic
